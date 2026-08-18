@@ -37,6 +37,10 @@ docker compose -f deploy/compose.yaml --env-file deploy/.env up --build
 4. 内部 API（P10 用）: `CALENDAR_INTERNAL_TOKEN` を設定し `POST /internal/v1/event-types`
 5. P10 webhook: `CALENDAR_WEBHOOK_URL` を worker に設定。予約確定で `calendar.booking.confirmed` が POST される
 
+## P05 ↔ P10 連携デモ
+
+P10 talent-api と組み合わせた予約確定→面接ステータス更新デモの手順は `project/portfolio-plan/integration-demo.md` の「P05 ↔ P10」節を参照。
+
 ## テスト
 
 ```powershell
