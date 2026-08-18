@@ -1,8 +1,9 @@
 import { Temporal } from "@js-temporal/polyfill";
-import { ConflictError, NotFoundError, type Booking, type BookingInsert, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
+import { ConflictError, NotFoundError, type Booking, type BookingInsert, type BookingWithEvent, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
 import { newId } from "./ids.js";
 import type { AvailabilityRule } from "./domain.js";
 import type { Store } from "./store.js";
+import { hashCancelToken } from "./tokens.js";
 
 type StoredBooking = Booking & { cancelTokenHash: string };
 
@@ -119,6 +120,40 @@ export class MemoryStore implements Store {
     };
     this.bookings.push(row);
     return { booking: publicBooking(row), created: true };
+  }
+
+  async cancelBookingByToken(cancelToken: string): Promise<Booking> {
+    const row = this.findByTokenHash(cancelToken);
+    if (!row) {
+      throw new NotFoundError();
+    }
+    if (row.status === "cancelled") {
+      return publicBooking(row);
+    }
+    row.status = "cancelled";
+    return publicBooking(row);
+  }
+
+  async getBookingByCancelToken(cancelToken: string): Promise<BookingWithEvent | null> {
+    const row = this.findByTokenHash(cancelToken);
+    if (!row || row.status !== "confirmed") {
+      return null;
+    }
+    const eventType = this.eventTypes.get(row.eventTypeId);
+    if (!eventType) {
+      return null;
+    }
+    return {
+      booking: publicBooking(row),
+      eventTypeName: eventType.name,
+      hostTimeZone: eventType.hostTimeZone,
+      eventSlug: eventType.slug,
+    };
+  }
+
+  private findByTokenHash(cancelToken: string): StoredBooking | undefined {
+    const hash = hashCancelToken(cancelToken);
+    return this.bookings.find((b) => b.cancelTokenHash === hash);
   }
 
   private overlapsConfirmed(eventTypeId: string, start: string, end: string): boolean {

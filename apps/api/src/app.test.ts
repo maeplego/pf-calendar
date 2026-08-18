@@ -333,6 +333,58 @@ describe("public booking", () => {
     const replay = (await second.json()) as { cancelToken?: string; id: string };
     expect(replay.cancelToken).toBeUndefined();
   });
+
+  it("cancels a booking with the cancel token and frees the slot", async () => {
+    const app = testApp();
+    await seedTokyo(app, "cancel-me");
+    const booked = await app.request("/public/cancel-me/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bookBody({ idempotencyKey: "idem-cancel-me" })),
+    });
+    expect(booked.status).toBe(201);
+    const created = (await booked.json()) as { cancelToken: string };
+    const cancelled = await app.request("/public/bookings/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cancelToken: created.cancelToken }),
+    });
+    expect(cancelled.status).toBe(200);
+    const body = (await cancelled.json()) as { status: string };
+    expect(body.status).toBe("cancelled");
+
+    const slots = await app.request(`/public/cancel-me/slots?${mondayRange()}`);
+    const slotBody = (await slots.json()) as { starts: string[] };
+    expect(slotBody.starts).toContain(mondayStart());
+  });
+
+  it("returns not found for an invalid cancel token without leaking email", async () => {
+    const app = testApp();
+    const res = await app.request("/public/bookings/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cancelToken: "not-a-real-token-value-here-xxxxxxxx" }),
+    });
+    expect(res.status).toBe(404);
+    expect(JSON.stringify(await res.json())).not.toMatch(/@/);
+  });
+
+  it("serves ICS for a confirmed booking token", async () => {
+    const app = testApp();
+    await seedTokyo(app, "ics-me");
+    const booked = await app.request("/public/ics-me/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bookBody({ idempotencyKey: "idem-ics" })),
+    });
+    const created = (await booked.json()) as { cancelToken: string };
+    const ics = await app.request(`/public/bookings/ics?token=${encodeURIComponent(created.cancelToken)}`);
+    expect(ics.status).toBe(200);
+    expect(ics.headers.get("content-type")).toContain("text/calendar");
+    const text = await ics.text();
+    expect(text).toContain("BEGIN:VCALENDAR");
+    expect(text).toContain("DTSTART:20260302T000000Z");
+  });
 });
 
 async function eventId(app: ReturnType<typeof testApp>): Promise<string> {

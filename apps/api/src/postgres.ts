@@ -2,10 +2,11 @@ import { Temporal } from "@js-temporal/polyfill";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ConflictError, NotFoundError, type Booking, type BookingInsert, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
+import { ConflictError, NotFoundError, type Booking, type BookingInsert, type BookingWithEvent, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
 import { newId } from "./ids.js";
 import type { AvailabilityRule } from "./domain.js";
 import type { Store } from "./store.js";
+import { hashCancelToken } from "./tokens.js";
 
 const schemaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "schema.sql");
 
@@ -41,7 +42,7 @@ type BookingRow = {
   guest_name: string;
   guest_email: string;
   guest_time_zone: string;
-  status: "confirmed";
+  status: "confirmed" | "cancelled";
   idempotency_key: string;
 };
 
@@ -247,6 +248,48 @@ export class PostgresStore implements Store {
     }
     const created = await this.bookingById(id);
     return { booking: created, created: true };
+  }
+
+  async cancelBookingByToken(cancelToken: string): Promise<Booking> {
+    const hash = hashCancelToken(cancelToken);
+    const found = await this.pool.query<BookingRow>(
+      `SELECT id, event_type_id, start_at, end_at, guest_name, guest_email, guest_time_zone, status, idempotency_key
+       FROM bookings WHERE cancel_token_hash = $1`,
+      [hash],
+    );
+    if (!found.rowCount) {
+      throw new NotFoundError();
+    }
+    const row = found.rows[0];
+    if (row.status === "cancelled") {
+      return toBooking(row);
+    }
+    await this.pool.query("UPDATE bookings SET status = 'cancelled' WHERE id = $1", [row.id]);
+    return toBooking({ ...row, status: "cancelled" });
+  }
+
+  async getBookingByCancelToken(cancelToken: string): Promise<BookingWithEvent | null> {
+    const hash = hashCancelToken(cancelToken);
+    const found = await this.pool.query<
+      BookingRow & { event_name: string; host_time_zone: string; slug: string }
+    >(
+      `SELECT b.id, b.event_type_id, b.start_at, b.end_at, b.guest_name, b.guest_email, b.guest_time_zone, b.status, b.idempotency_key,
+              e.name AS event_name, e.host_time_zone, e.slug
+       FROM bookings b
+       JOIN event_types e ON e.id = b.event_type_id
+       WHERE b.cancel_token_hash = $1 AND b.status = 'confirmed'`,
+      [hash],
+    );
+    if (!found.rowCount) {
+      return null;
+    }
+    const row = found.rows[0];
+    return {
+      booking: toBooking(row),
+      eventTypeName: row.event_name,
+      hostTimeZone: row.host_time_zone,
+      eventSlug: row.slug,
+    };
   }
 
   private async bookingById(id: string): Promise<Booking> {

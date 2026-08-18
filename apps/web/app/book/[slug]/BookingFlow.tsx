@@ -134,9 +134,21 @@ export function BookingFlow({ slug, apiBase }: { slug: string; apiBase: string }
           </p>
         )}
         {result.cancelToken && (
-          <p style={{ wordBreak: "break-all" }}>
-            キャンセルトークン（この画面で一度だけ表示）: <code>{result.cancelToken}</code>
-          </p>
+          <>
+            <p style={{ wordBreak: "break-all" }}>
+              キャンセルトークン（この画面で一度だけ表示）: <code>{result.cancelToken}</code>
+            </p>
+            <p>
+              <a href={`/cancel?token=${encodeURIComponent(result.cancelToken)}`}>キャンセルページを開く</a>
+              {" · "}
+              <a
+                href={`${apiBase}/public/bookings/ics?token=${encodeURIComponent(result.cancelToken)}`}
+                download={`booking-${result.id}.ics`}
+              >
+                カレンダー (.ics) をダウンロード
+              </a>
+            </p>
+          </>
         )}
         <button type="button" onClick={() => setResult(null)}>
           別の枠を予約

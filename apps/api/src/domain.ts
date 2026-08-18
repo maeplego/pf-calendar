@@ -45,8 +45,15 @@ export type Booking = {
   guestName: string;
   guestEmail: string;
   guestTimeZone: string;
-  status: "confirmed";
+  status: "confirmed" | "cancelled";
   idempotencyKey: string;
+};
+
+export type BookingWithEvent = {
+  booking: Booking;
+  eventTypeName: string;
+  hostTimeZone: string;
+  eventSlug: string;
 };
 
 export type BookingInsert = {

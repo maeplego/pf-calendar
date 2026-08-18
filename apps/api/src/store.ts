@@ -13,4 +13,6 @@ export type Store = {
   listConfirmedBookings(eventTypeId: string): Promise<Booking[]>;
   findBookingByIdempotency(eventTypeId: string, idempotencyKey: string): Promise<Booking | null>;
   createBooking(eventType: EventType, input: BookingInsert): Promise<{ booking: Booking; created: boolean }>;
+  cancelBookingByToken(cancelToken: string): Promise<Booking>;
+  getBookingByCancelToken(cancelToken: string): Promise<BookingWithEvent | null>;
 };

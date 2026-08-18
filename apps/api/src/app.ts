@@ -11,6 +11,7 @@ import type { Clock } from "./clock.js";
 import { ConflictError, NotFoundError, SlotUnavailableError, type EventType, type Host } from "./domain.js";
 import { isOfferedStart, offeredStartIsos } from "./slots.js";
 import type { Store } from "./store.js";
+import { buildBookingIcs } from "./ics.js";
 import { newCancelToken } from "./tokens.js";
 
 const slugSchema = z
@@ -74,6 +75,49 @@ export function createApp(deps: AppDeps): Hono<Env> {
       allowMethods: ["GET", "POST", "OPTIONS"],
     }),
   );
+
+  app.post("/public/bookings/cancel", async (c) => {
+    const body = (await c.req.json().catch(() => null)) as { cancelToken?: string } | null;
+    const cancelToken = body?.cancelToken?.trim();
+    if (!cancelToken) {
+      return invalid(c, "cancelToken is required");
+    }
+    try {
+      const booking = await deps.store.cancelBookingByToken(cancelToken);
+      return c.json({
+        id: booking.id,
+        status: booking.status,
+        start: booking.start,
+        end: booking.end,
+      });
+    } catch (err) {
+      return mapError(c, err);
+    }
+  });
+
+  app.get("/public/bookings/ics", async (c) => {
+    const cancelToken = c.req.query("token")?.trim();
+    if (!cancelToken) {
+      return invalid(c, "token query parameter is required");
+    }
+    const row = await deps.store.getBookingByCancelToken(cancelToken);
+    if (!row) {
+      return c.json({ error: { code: "not_found", message: "not found" } }, 404);
+    }
+    const ics = buildBookingIcs({
+      uid: row.booking.id,
+      summary: row.eventTypeName,
+      description: `Booking with ${row.booking.guestName}`,
+      start: row.booking.start,
+      end: row.booking.end,
+      guestTimeZone: row.booking.guestTimeZone,
+      hostTimeZone: row.hostTimeZone,
+    });
+    return c.body(ics, 200, {
+      "Content-Type": "text/calendar; charset=utf-8",
+      "Content-Disposition": `attachment; filename="booking-${row.booking.id}.ics"`,
+    });
+  });
 
   app.get("/health", (c) => c.json({ ok: true }));
   app.get("/ready", async (c) => {
