@@ -1,8 +1,8 @@
+import { Temporal } from "@js-temporal/polyfill";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import pg from "pg";
-import { ConflictError, NotFoundError, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
+import { ConflictError, NotFoundError, type Booking, type BookingInsert, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
 import { newId } from "./ids.js";
 import type { AvailabilityRule } from "./domain.js";
 import type { Store } from "./store.js";
@@ -31,6 +31,18 @@ type OverrideRow = {
   event_type_id: string;
   on_date: string;
   blocked: boolean;
+};
+
+type BookingRow = {
+  id: string;
+  event_type_id: string;
+  start_at: Date;
+  end_at: Date;
+  guest_name: string;
+  guest_email: string;
+  guest_time_zone: string;
+  status: "confirmed";
+  idempotency_key: string;
 };
 
 export class PostgresStore implements Store {
@@ -174,6 +186,90 @@ export class PostgresStore implements Store {
     return this.getEventType(host, id);
   }
 
+  async getEventTypeBySlug(slug: string): Promise<EventType> {
+    const found = await this.pool.query<EventTypeRow>("SELECT * FROM event_types WHERE slug = $1", [slug]);
+    if (!found.rowCount) {
+      throw new NotFoundError();
+    }
+    return this.hydrate(found.rows[0]);
+  }
+
+  async listConfirmedBookings(eventTypeId: string): Promise<Booking[]> {
+    const found = await this.pool.query<BookingRow>(
+      `SELECT id, event_type_id, start_at, end_at, guest_name, guest_email, guest_time_zone, status, idempotency_key
+       FROM bookings WHERE event_type_id = $1 AND status = 'confirmed' ORDER BY start_at`,
+      [eventTypeId],
+    );
+    return found.rows.map(toBooking);
+  }
+
+  async findBookingByIdempotency(eventTypeId: string, idempotencyKey: string): Promise<Booking | null> {
+    return this.bookingByIdempotency(eventTypeId, idempotencyKey);
+  }
+
+  async createBooking(eventType: EventType, input: BookingInsert): Promise<{ booking: Booking; created: boolean }> {
+    const id = newId();
+    try {
+      await this.pool.query(
+        `INSERT INTO bookings (
+           id, event_type_id, start_at, end_at, guest_name, guest_email, guest_time_zone,
+           status, idempotency_key, cancel_token_hash
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'confirmed', $8, $9)`,
+        [
+          id,
+          eventType.id,
+          input.start,
+          input.end,
+          input.guestName,
+          input.guestEmail,
+          input.guestTimeZone,
+          input.idempotencyKey,
+          input.cancelTokenHash,
+        ],
+      );
+    } catch (err) {
+      if (isUniqueViolation(err)) {
+        const existing = await this.bookingByIdempotency(eventType.id, input.idempotencyKey);
+        if (
+          existing &&
+          Temporal.Instant.compare(Temporal.Instant.from(existing.start), Temporal.Instant.from(input.start)) === 0 &&
+          Temporal.Instant.compare(Temporal.Instant.from(existing.end), Temporal.Instant.from(input.end)) === 0 &&
+          existing.guestEmail === input.guestEmail
+        ) {
+          return { booking: existing, created: false };
+        }
+        throw new ConflictError("idempotency key reused with a different request");
+      }
+      if (isExclusionViolation(err)) {
+        throw new ConflictError("slot unavailable");
+      }
+      throw err;
+    }
+    const created = await this.bookingById(id);
+    return { booking: created, created: true };
+  }
+
+  private async bookingById(id: string): Promise<Booking> {
+    const found = await this.pool.query<BookingRow>(
+      `SELECT id, event_type_id, start_at, end_at, guest_name, guest_email, guest_time_zone, status, idempotency_key
+       FROM bookings WHERE id = $1`,
+      [id],
+    );
+    if (!found.rowCount) {
+      throw new NotFoundError();
+    }
+    return toBooking(found.rows[0]);
+  }
+
+  private async bookingByIdempotency(eventTypeId: string, key: string): Promise<Booking | null> {
+    const found = await this.pool.query<BookingRow>(
+      `SELECT id, event_type_id, start_at, end_at, guest_name, guest_email, guest_time_zone, status, idempotency_key
+       FROM bookings WHERE event_type_id = $1 AND idempotency_key = $2`,
+      [eventTypeId, key],
+    );
+    return found.rowCount ? toBooking(found.rows[0]) : null;
+  }
+
   private async assertOwned(host: Host, id: string): Promise<void> {
     const found = await this.pool.query("SELECT 1 FROM event_types WHERE id = $1 AND host_id = $2", [id, host.id]);
     if (!found.rowCount) {
@@ -246,6 +342,24 @@ function toEventType(row: EventTypeRow, rules: AvailabilityRule[], overrides: Da
   };
 }
 
+function toBooking(row: BookingRow): Booking {
+  return {
+    id: row.id,
+    eventTypeId: row.event_type_id,
+    start: row.start_at.toISOString(),
+    end: row.end_at.toISOString(),
+    guestName: row.guest_name,
+    guestEmail: row.guest_email,
+    guestTimeZone: row.guest_time_zone,
+    status: row.status,
+    idempotencyKey: row.idempotency_key,
+  };
+}
+
 function isUniqueViolation(err: unknown): boolean {
   return typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23505";
+}
+
+function isExclusionViolation(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code: string }).code === "23P01";
 }

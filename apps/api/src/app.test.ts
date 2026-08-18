@@ -199,3 +199,139 @@ describe("calendar API event types", () => {
     expect(ready.status).toBe(200);
   });
 });
+
+describe("public booking", () => {
+  async function seedTokyo(app: ReturnType<typeof testApp>, slug = "public-30") {
+    const created = await app.request("/v1/event-types", {
+      method: "POST",
+      headers: hostHeaders(),
+      body: JSON.stringify({
+        slug,
+        name: "Public 30",
+        durationMinutes: 30,
+        hostTimeZone: TOKYO,
+        rules: weekdayRules,
+      }),
+    });
+    expect(created.status).toBe(201);
+    return slug;
+  }
+
+  const mondayStart = () => tokyoInstant("2026-03-02T09:00:00");
+  const mondayRange = () =>
+    `rangeStart=${encodeURIComponent(tokyoInstant("2026-03-02T00:00:00"))}&rangeEnd=${encodeURIComponent(tokyoInstant("2026-03-03T00:00:00"))}`;
+
+  function bookBody(overrides: Record<string, unknown> = {}) {
+    return {
+      slotStart: mondayStart(),
+      name: "Guest A",
+      email: "a@example.test",
+      guestTimeZone: "America/Los_Angeles",
+      idempotencyKey: "idem-aaaaaaaa",
+      ...overrides,
+    };
+  }
+
+  it("lists public slots without host auth and without guest PII", async () => {
+    const app = testApp();
+    await seedTokyo(app);
+    const slots = await app.request(`/public/public-30/slots?${mondayRange()}`);
+    expect(slots.status).toBe(200);
+    const body = (await slots.json()) as Record<string, unknown>;
+    expect(body.starts).toEqual([
+      tokyoInstant("2026-03-02T09:00:00"),
+      tokyoInstant("2026-03-02T09:30:00"),
+      tokyoInstant("2026-03-02T10:00:00"),
+      tokyoInstant("2026-03-02T10:30:00"),
+      tokyoInstant("2026-03-02T11:00:00"),
+      tokyoInstant("2026-03-02T11:30:00"),
+    ]);
+    expect(JSON.stringify(body)).not.toMatch(/@/);
+    expect(body).not.toHaveProperty("guestName");
+  });
+
+  it("books an offered slot and hides it afterwards", async () => {
+    const app = testApp();
+    await seedTokyo(app);
+    const booked = await app.request("/public/public-30/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bookBody()),
+    });
+    expect(booked.status).toBe(201);
+    const created = (await booked.json()) as { id: string; cancelToken: string; start: string };
+    expect(created.cancelToken.length).toBeGreaterThan(20);
+    expect(created.start).toBe(mondayStart());
+
+    const slots = await app.request(`/public/public-30/slots?${mondayRange()}`);
+    const body = (await slots.json()) as { starts: string[] };
+    expect(body.starts).not.toContain(mondayStart());
+
+    const hostBookings = await app.request("/v1/event-types/" + (await eventId(app)) + "/bookings", {
+      headers: hostHeaders(),
+    });
+    const listed = (await hostBookings.json()) as { bookings: { guestEmail: string }[] };
+    expect(listed.bookings).toHaveLength(1);
+    expect(listed.bookings[0].guestEmail).toBe("a@example.test");
+  });
+
+  it("lets only one of two concurrent books for the same slot succeed", async () => {
+    const app = testApp();
+    await seedTokyo(app, "race-30");
+    const [a, b] = await Promise.all([
+      app.request("/public/race-30/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bookBody({ email: "a@example.test", idempotencyKey: "idem-race-a" })),
+      }),
+      app.request("/public/race-30/book", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(bookBody({ email: "b@example.test", idempotencyKey: "idem-race-b" })),
+      }),
+    ]);
+    const statuses = [a.status, b.status].sort();
+    expect(statuses).toEqual([201, 409]);
+    const failed = a.status === 409 ? a : b;
+    const err = (await failed.json()) as { error: { code: string; message: string } };
+    expect(err.error.code).toBe("slot_unavailable");
+    expect(err.error.message).toBe("slot unavailable");
+    expect(JSON.stringify(err)).not.toMatch(/@/);
+  });
+
+  it("rejects a client-invented Instant that is not an offered slot", async () => {
+    const app = testApp();
+    await seedTokyo(app, "invented");
+    const booked = await app.request("/public/invented/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bookBody({ slotStart: tokyoInstant("2026-03-02T08:00:00"), idempotencyKey: "idem-invent" })),
+    });
+    expect(booked.status).toBe(409);
+  });
+
+  it("replays the same idempotency key without issuing a second cancel token", async () => {
+    const app = testApp();
+    await seedTokyo(app, "idem-30");
+    const first = await app.request("/public/idem-30/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bookBody({ idempotencyKey: "idem-same-key" })),
+    });
+    expect(first.status).toBe(201);
+    const second = await app.request("/public/idem-30/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bookBody({ idempotencyKey: "idem-same-key" })),
+    });
+    expect(second.status).toBe(200);
+    const replay = (await second.json()) as { cancelToken?: string; id: string };
+    expect(replay.cancelToken).toBeUndefined();
+  });
+});
+
+async function eventId(app: ReturnType<typeof testApp>): Promise<string> {
+  const listed = await app.request("/v1/event-types", { headers: hostHeaders() });
+  const body = (await listed.json()) as { eventTypes: { id: string }[] };
+  return body.eventTypes[0].id;
+}

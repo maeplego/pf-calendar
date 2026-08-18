@@ -37,6 +37,28 @@ export type EventTypeInput = {
   rules: AvailabilityRule[];
 };
 
+export type Booking = {
+  id: string;
+  eventTypeId: string;
+  start: string;
+  end: string;
+  guestName: string;
+  guestEmail: string;
+  guestTimeZone: string;
+  status: "confirmed";
+  idempotencyKey: string;
+};
+
+export type BookingInsert = {
+  start: string;
+  end: string;
+  guestName: string;
+  guestEmail: string;
+  guestTimeZone: string;
+  idempotencyKey: string;
+  cancelTokenHash: string;
+};
+
 export class NotFoundError extends Error {
   readonly name = "NotFoundError";
   constructor(message = "not found") {
@@ -48,5 +70,12 @@ export class ConflictError extends Error {
   readonly name = "ConflictError";
   constructor(message: string) {
     super(message);
+  }
+}
+
+export class SlotUnavailableError extends Error {
+  readonly name = "SlotUnavailableError";
+  constructor() {
+    super("slot unavailable");
   }
 }

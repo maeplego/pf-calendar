@@ -2,11 +2,11 @@
 
 P05 の予約・日程調整です。**本番 Calendly の置き換えではありません。** 学習用ポートフォリオです。
 
-空きルールからスロットを生成し、ホスト現地のタイムゾーンで矛盾しない枠だけを出します。予約確定の正は `apps/api` です（スライス 3 で `POST book`）。
+空きルールからスロットを生成し、ホスト現地のタイムゾーンで矛盾しない枠だけを出します。予約確定の正は `apps/api` です。公開予約に IdP は不要です。
 
 ```
 packages/slot-engine/  スロット計算の純関数（Temporal）
-apps/api/              Hono。イベントタイプ / 空きルール / 例外日。枠は slot-engine
+apps/api/              Hono。イベントタイプと公開 book。枠は slot-engine、重複は DB exclusion
 deploy/                Postgres + API Compose
 ```
 
@@ -22,6 +22,8 @@ docker compose -f deploy/compose.yaml up --build
 | --- | --- |
 | http://localhost:8095/health | liveness |
 | http://localhost:8095/v1/event-types | ホスト API（ヘッダ `X-Dev-Host-Sub` 必須） |
+| http://localhost:8095/public/:slug/slots | ゲスト向け空き枠（認証なし） |
+| http://localhost:8095/public/:slug/book | ゲスト予約（認証なし） |
 
 ホストなしで API だけ動かすときは `CALENDAR_DATABASE_URL` を空にするとメモリ実装になります。
 

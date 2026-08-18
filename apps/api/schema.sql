@@ -1,3 +1,5 @@
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
 CREATE TABLE IF NOT EXISTS hosts (
   id TEXT PRIMARY KEY,
   sub TEXT NOT NULL UNIQUE,
@@ -31,4 +33,27 @@ CREATE TABLE IF NOT EXISTS date_overrides (
   on_date DATE NOT NULL,
   blocked BOOLEAN NOT NULL DEFAULT TRUE,
   UNIQUE (event_type_id, on_date)
+);
+
+-- 同じ枠の二重予約は gist exclusion が最後の砦。アプリの空き判定だけでは競合する。
+CREATE TABLE IF NOT EXISTS bookings (
+  id TEXT PRIMARY KEY,
+  event_type_id TEXT NOT NULL REFERENCES event_types (id) ON DELETE CASCADE,
+  start_at TIMESTAMPTZ NOT NULL,
+  end_at TIMESTAMPTZ NOT NULL,
+  during TSTZRANGE NOT NULL GENERATED ALWAYS AS (tstzrange(start_at, end_at, '[)')) STORED,
+  guest_name TEXT NOT NULL,
+  guest_email TEXT NOT NULL,
+  guest_time_zone TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'confirmed',
+  idempotency_key TEXT NOT NULL,
+  cancel_token_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (event_type_id, idempotency_key),
+  CONSTRAINT bookings_confirmed_no_overlap
+    EXCLUDE USING gist (
+      event_type_id WITH =,
+      during WITH &&
+    )
+    WHERE (status = 'confirmed')
 );

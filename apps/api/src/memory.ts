@@ -1,11 +1,15 @@
-import { ConflictError, NotFoundError, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
+import { Temporal } from "@js-temporal/polyfill";
+import { ConflictError, NotFoundError, type Booking, type BookingInsert, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
 import { newId } from "./ids.js";
 import type { AvailabilityRule } from "./domain.js";
 import type { Store } from "./store.js";
 
+type StoredBooking = Booking & { cancelTokenHash: string };
+
 export class MemoryStore implements Store {
   private hostsBySub = new Map<string, Host>();
   private eventTypes = new Map<string, EventType>();
+  private bookings: StoredBooking[] = [];
 
   async ping(): Promise<void> {
     return;
@@ -44,6 +48,15 @@ export class MemoryStore implements Store {
     return cloneEventType(row);
   }
 
+  async getEventTypeBySlug(slug: string): Promise<EventType> {
+    for (const row of this.eventTypes.values()) {
+      if (row.slug === slug) {
+        return cloneEventType(row);
+      }
+    }
+    throw new NotFoundError();
+  }
+
   async listEventTypes(host: Host): Promise<EventType[]> {
     return [...this.eventTypes.values()]
       .filter((row) => row.hostId === host.id)
@@ -62,6 +75,65 @@ export class MemoryStore implements Store {
     return cloneEventType(row);
   }
 
+  async listConfirmedBookings(eventTypeId: string): Promise<Booking[]> {
+    return this.bookings
+      .filter((b) => b.eventTypeId === eventTypeId && b.status === "confirmed")
+      .map(publicBooking);
+  }
+
+  async findBookingByIdempotency(eventTypeId: string, idempotencyKey: string): Promise<Booking | null> {
+    const existing = this.bookings.find(
+      (b) => b.eventTypeId === eventTypeId && b.idempotencyKey === idempotencyKey,
+    );
+    return existing ? publicBooking(existing) : null;
+  }
+
+  async createBooking(eventType: EventType, input: BookingInsert): Promise<{ booking: Booking; created: boolean }> {
+    const existing = this.bookings.find(
+      (b) => b.eventTypeId === eventType.id && b.idempotencyKey === input.idempotencyKey,
+    );
+    if (existing) {
+      if (
+        existing.start !== input.start ||
+        existing.end !== input.end ||
+        existing.guestEmail !== input.guestEmail
+      ) {
+        throw new ConflictError("idempotency key reused with a different request");
+      }
+      return { booking: publicBooking(existing), created: false };
+    }
+    if (this.overlapsConfirmed(eventType.id, input.start, input.end)) {
+      throw new ConflictError("slot unavailable");
+    }
+    const row: StoredBooking = {
+      id: newId(),
+      eventTypeId: eventType.id,
+      start: input.start,
+      end: input.end,
+      guestName: input.guestName,
+      guestEmail: input.guestEmail,
+      guestTimeZone: input.guestTimeZone,
+      status: "confirmed",
+      idempotencyKey: input.idempotencyKey,
+      cancelTokenHash: input.cancelTokenHash,
+    };
+    this.bookings.push(row);
+    return { booking: publicBooking(row), created: true };
+  }
+
+  private overlapsConfirmed(eventTypeId: string, start: string, end: string): boolean {
+    const a0 = Temporal.Instant.from(start);
+    const a1 = Temporal.Instant.from(end);
+    return this.bookings.some((b) => {
+      if (b.eventTypeId !== eventTypeId || b.status !== "confirmed") {
+        return false;
+      }
+      const b0 = Temporal.Instant.from(b.start);
+      const b1 = Temporal.Instant.from(b.end);
+      return Temporal.Instant.compare(a0, b1) < 0 && Temporal.Instant.compare(b0, a1) < 0;
+    });
+  }
+
   private owned(host: Host, id: string): EventType {
     const row = this.eventTypes.get(id);
     if (!row || row.hostId !== host.id) {
@@ -77,6 +149,20 @@ export class MemoryStore implements Store {
       }
     }
   }
+}
+
+function publicBooking(row: StoredBooking): Booking {
+  return {
+    id: row.id,
+    eventTypeId: row.eventTypeId,
+    start: row.start,
+    end: row.end,
+    guestName: row.guestName,
+    guestEmail: row.guestEmail,
+    guestTimeZone: row.guestTimeZone,
+    status: row.status,
+    idempotencyKey: row.idempotencyKey,
+  };
 }
 
 function cloneRules(rules: AvailabilityRule[]): AvailabilityRule[] {

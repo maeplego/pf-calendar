@@ -1,13 +1,15 @@
+import { Temporal } from "@js-temporal/polyfill";
 import {
   InvalidSlotInputError,
   RangeTooLongError,
-  generateSlotStartsIso,
 } from "@pf-calendar/slot-engine";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { Clock } from "./clock.js";
-import { ConflictError, NotFoundError, type EventType, type Host } from "./domain.js";
+import { ConflictError, NotFoundError, SlotUnavailableError, type EventType, type Host } from "./domain.js";
+import { isOfferedStart, offeredStartIsos } from "./slots.js";
 import type { Store } from "./store.js";
+import { newCancelToken } from "./tokens.js";
 
 const slugSchema = z
   .string()
@@ -39,6 +41,14 @@ const createSchema = z.object({
 const rulesBodySchema = z.object({ rules: z.array(ruleSchema) });
 const overridesBodySchema = z.object({ overrides: z.array(overrideSchema) });
 
+const bookSchema = z.object({
+  slotStart: z.string().min(1),
+  name: z.string().min(1).max(80),
+  email: z.string().email().max(254),
+  guestTimeZone: z.string().min(1),
+  idempotencyKey: z.string().min(8).max(128),
+});
+
 type Env = {
   Variables: {
     host: Host;
@@ -62,6 +72,95 @@ export function createApp(deps: AppDeps): Hono<Env> {
     } catch (err) {
       console.error("ready check failed", err);
       return c.json({ ok: false }, 503);
+    }
+  });
+
+  app.get("/public/:slug/slots", async (c) => {
+    const rangeStart = c.req.query("rangeStart");
+    const rangeEnd = c.req.query("rangeEnd");
+    if (!rangeStart || !rangeEnd) {
+      return invalid(c, "rangeStart and rangeEnd are required Instant strings");
+    }
+    try {
+      const row = await deps.store.getEventTypeBySlug(c.req.param("slug"));
+      const bookings = await deps.store.listConfirmedBookings(row.id);
+      const starts = offeredStartIsos(
+        row,
+        engineBookings(bookings),
+        rangeStart,
+        rangeEnd,
+        c.req.query("now") || deps.clock.nowIso(),
+      );
+      return c.json({
+        slug: row.slug,
+        name: row.name,
+        durationMinutes: row.durationMinutes,
+        hostTimeZone: row.hostTimeZone,
+        starts,
+      });
+    } catch (err) {
+      return mapError(c, err);
+    }
+  });
+
+  app.post("/public/:slug/book", async (c) => {
+    const parsed = bookSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+      return invalid(c, parsed.error.message);
+    }
+    try {
+      validateTimeZone(parsed.data.guestTimeZone);
+      const row = await deps.store.getEventTypeBySlug(c.req.param("slug"));
+      const slotStart = Temporal.Instant.from(parsed.data.slotStart);
+      const slotEnd = slotStart.add({ minutes: row.durationMinutes });
+      const email = parsed.data.email.trim().toLowerCase();
+      const existing = await deps.store.findBookingByIdempotency(row.id, parsed.data.idempotencyKey);
+      if (existing) {
+        const same =
+          Temporal.Instant.compare(Temporal.Instant.from(existing.start), slotStart) === 0 &&
+          Temporal.Instant.compare(Temporal.Instant.from(existing.end), slotEnd) === 0 &&
+          existing.guestEmail === email;
+        if (!same) {
+          throw new ConflictError("idempotency key reused with a different request");
+        }
+        return c.json(
+          {
+            id: existing.id,
+            start: existing.start,
+            end: existing.end,
+            guestTimeZone: existing.guestTimeZone,
+          },
+          200,
+        );
+      }
+      const bookings = await deps.store.listConfirmedBookings(row.id);
+      const now = deps.clock.nowIso();
+      // クライアントの「この Instant が空」は信じない。ホスト現地のその日を再計算する。
+      if (!isOfferedStart(row, engineBookings(bookings), slotStart, now)) {
+        throw new SlotUnavailableError();
+      }
+      const cancel = newCancelToken();
+      const result = await deps.store.createBooking(row, {
+        start: slotStart.toString(),
+        end: slotEnd.toString(),
+        guestName: parsed.data.name,
+        guestEmail: email,
+        guestTimeZone: parsed.data.guestTimeZone,
+        idempotencyKey: parsed.data.idempotencyKey,
+        cancelTokenHash: cancel.hash,
+      });
+      const body: Record<string, unknown> = {
+        id: result.booking.id,
+        start: result.booking.start,
+        end: result.booking.end,
+        guestTimeZone: result.booking.guestTimeZone,
+      };
+      if (result.created) {
+        body.cancelToken = cancel.token;
+      }
+      return c.json(body, result.created ? 201 : 200);
+    } catch (err) {
+      return mapError(c, err);
     }
   });
 
@@ -139,25 +238,49 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
     try {
       const row = await deps.store.getEventType(c.get("host"), c.req.param("id"));
-      const starts = generateSlotStartsIso({
-        durationMinutes: row.durationMinutes,
-        bufferMinutes: row.bufferMinutes,
-        minNoticeMinutes: row.minNoticeMinutes,
-        hostTimeZone: row.hostTimeZone,
-        rules: row.rules,
-        overrides: row.overrides,
-        existingBookings: [],
+      const bookings = await deps.store.listConfirmedBookings(row.id);
+      const starts = offeredStartIsos(
+        row,
+        engineBookings(bookings),
         rangeStart,
         rangeEnd,
-        now: c.req.query("now") || deps.clock.nowIso(),
-      });
+        c.req.query("now") || deps.clock.nowIso(),
+      );
       return c.json({ starts });
     } catch (err) {
       return mapError(c, err);
     }
   });
 
+  app.get("/v1/event-types/:id/bookings", async (c) => {
+    try {
+      const row = await deps.store.getEventType(c.get("host"), c.req.param("id"));
+      const bookings = await deps.store.listConfirmedBookings(row.id);
+      return c.json({
+        bookings: bookings.map((b) => ({
+          id: b.id,
+          start: b.start,
+          end: b.end,
+          guestName: b.guestName,
+          guestEmail: b.guestEmail,
+          guestTimeZone: b.guestTimeZone,
+          status: b.status,
+        })),
+      });
+    } catch (err) {
+      return mapError(c, err);
+    }
+  });
+
   return app;
+}
+
+function engineBookings(bookings: { start: string; end: string }[]) {
+  return bookings.map((b) => ({ start: b.start, end: b.end }));
+}
+
+function validateTimeZone(timeZone: string): void {
+  Temporal.ZonedDateTime.from({ year: 1970, month: 1, day: 1, timeZone });
 }
 
 function publicEventType(row: EventType) {
@@ -182,10 +305,20 @@ function mapError(c: { json: (body: unknown, status: 400 | 404 | 409 | 500) => R
   if (err instanceof NotFoundError) {
     return c.json({ error: { code: "not_found", message: "not found" } }, 404);
   }
+  if (err instanceof SlotUnavailableError) {
+    return c.json({ error: { code: "slot_unavailable", message: "slot unavailable" } }, 409);
+  }
   if (err instanceof ConflictError) {
-    return c.json({ error: { code: "conflict", message: err.message } }, 409);
+    const unavailable = err.message === "slot unavailable";
+    return c.json(
+      { error: { code: unavailable ? "slot_unavailable" : "conflict", message: err.message } },
+      409,
+    );
   }
   if (err instanceof InvalidSlotInputError || err instanceof RangeTooLongError) {
+    return c.json({ error: { code: "invalid_request", message: err.message } }, 400);
+  }
+  if (err instanceof RangeError || (err instanceof Error && err.name === "RangeError")) {
     return c.json({ error: { code: "invalid_request", message: err.message } }, 400);
   }
   console.error(err);
