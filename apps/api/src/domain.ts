@@ -23,6 +23,7 @@ export type EventType = {
   bufferMinutes: number;
   minNoticeMinutes: number;
   hostTimeZone: string;
+  externalRef?: string;
   rules: AvailabilityRule[];
   overrides: DateOverride[];
 };
@@ -34,6 +35,7 @@ export type EventTypeInput = {
   bufferMinutes: number;
   minNoticeMinutes: number;
   hostTimeZone: string;
+  externalRef?: string;
   rules: AvailabilityRule[];
 };
 

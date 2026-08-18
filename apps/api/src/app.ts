@@ -58,11 +58,17 @@ type Env = {
   };
 };
 
+const internalCreateSchema = createSchema.extend({
+  hostSub: z.string().min(1).max(256),
+  externalRef: z.string().min(1).max(128).optional(),
+});
+
 export type AppDeps = {
   store: Store;
   clock: Clock;
   hostAuth: HostAuth;
   corsOrigin?: string;
+  internalToken?: string;
 };
 
 export function createApp(deps: AppDeps): Hono<Env> {
@@ -327,6 +333,72 @@ export function createApp(deps: AppDeps): Hono<Env> {
     }
   });
 
+  app.use("/internal/v1/*", async (c, next) => {
+    if (!deps.internalToken) {
+      return c.json({ error: { code: "unavailable", message: "internal API is disabled" } }, 503);
+    }
+    const auth = c.req.header("Authorization")?.trim() ?? "";
+    if (auth !== `Bearer ${deps.internalToken}`) {
+      return c.json({ error: { code: "unauthorized", message: "invalid internal token" } }, 401);
+    }
+    await next();
+  });
+
+  app.post("/internal/v1/event-types", async (c) => {
+    const parsed = internalCreateSchema.safeParse(await c.req.json());
+    if (!parsed.success) {
+      return invalid(c, parsed.error.message);
+    }
+    try {
+      const host = await deps.store.ensureHost(parsed.data.hostSub);
+      if (parsed.data.externalRef) {
+        const existing = await deps.store.findEventTypeByExternalRef(host, parsed.data.externalRef);
+        if (existing) {
+          return c.json(publicEventType(existing), 200);
+        }
+      }
+      const { hostSub: _hostSub, externalRef, ...input } = parsed.data;
+      const created = await deps.store.createEventType(host, { ...input, externalRef });
+      return c.json(publicEventType(created), 201);
+    } catch (err) {
+      return mapError(c, err);
+    }
+  });
+
+  app.get("/internal/v1/hosts/:sub/event-types", async (c) => {
+    try {
+      const host = await deps.store.ensureHost(c.req.param("sub"));
+      const rows = await deps.store.listEventTypes(host);
+      return c.json({ eventTypes: rows.map(publicEventType) });
+    } catch (err) {
+      return mapError(c, err);
+    }
+  });
+
+  app.get("/internal/v1/bookings/:id", async (c) => {
+    const row = await deps.store.getBookingWithEventById(c.req.param("id"));
+    if (!row) {
+      return c.json({ error: { code: "not_found", message: "not found" } }, 404);
+    }
+    return c.json({
+      booking: {
+        id: row.booking.id,
+        eventTypeId: row.booking.eventTypeId,
+        start: row.booking.start,
+        end: row.booking.end,
+        guestName: row.booking.guestName,
+        guestEmail: row.booking.guestEmail,
+        guestTimeZone: row.booking.guestTimeZone,
+        status: row.booking.status,
+      },
+      eventType: {
+        slug: row.eventSlug,
+        name: row.eventTypeName,
+        hostTimeZone: row.hostTimeZone,
+      },
+    });
+  });
+
   return app;
 }
 
@@ -347,6 +419,7 @@ function publicEventType(row: EventType) {
     bufferMinutes: row.bufferMinutes,
     minNoticeMinutes: row.minNoticeMinutes,
     hostTimeZone: row.hostTimeZone,
+    externalRef: row.externalRef,
     rules: row.rules,
     overrides: row.overrides,
   };

@@ -17,18 +17,38 @@ const weekdayRules = [1, 2, 3, 4, 5].map((dayOfWeek) => ({
   endLocal: "12:00",
 }));
 
-function testApp(now = tokyoInstant("2026-03-01T00:00:00")) {
+function testApp(now = tokyoInstant("2026-03-01T00:00:00"), internalToken = "test-internal") {
   const clock: Clock = { nowIso: () => now };
   const store = new MemoryStore();
   return createApp({
     store,
     clock,
     hostAuth: createHostAuth({ devAuth: true, oidcIssuer: "", oidcInternalBase: "", oidcAudience: "" }),
+    internalToken,
   });
+}
+
+function internalHeaders(token = "test-internal"): Record<string, string> {
+  return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
 function hostHeaders(sub = "host-a"): Record<string, string> {
   return { "X-Dev-Host-Sub": sub, "Content-Type": "application/json" };
+}
+
+const mondayStart = () => tokyoInstant("2026-03-02T09:00:00");
+const mondayRange = () =>
+  `rangeStart=${encodeURIComponent(tokyoInstant("2026-03-02T00:00:00"))}&rangeEnd=${encodeURIComponent(tokyoInstant("2026-03-03T00:00:00"))}`;
+
+function bookBody(overrides: Record<string, unknown> = {}) {
+  return {
+    slotStart: mondayStart(),
+    name: "Guest A",
+    email: "a@example.test",
+    guestTimeZone: "America/Los_Angeles",
+    idempotencyKey: "idem-aaaaaaaa",
+    ...overrides,
+  };
 }
 
 describe("calendar API event types", () => {
@@ -222,21 +242,6 @@ describe("public booking", () => {
     return slug;
   }
 
-  const mondayStart = () => tokyoInstant("2026-03-02T09:00:00");
-  const mondayRange = () =>
-    `rangeStart=${encodeURIComponent(tokyoInstant("2026-03-02T00:00:00"))}&rangeEnd=${encodeURIComponent(tokyoInstant("2026-03-03T00:00:00"))}`;
-
-  function bookBody(overrides: Record<string, unknown> = {}) {
-    return {
-      slotStart: mondayStart(),
-      name: "Guest A",
-      email: "a@example.test",
-      guestTimeZone: "America/Los_Angeles",
-      idempotencyKey: "idem-aaaaaaaa",
-      ...overrides,
-    };
-  }
-
   it("lists public slots without host auth and without guest PII", async () => {
     const app = testApp();
     await seedTokyo(app);
@@ -384,6 +389,100 @@ describe("public booking", () => {
     const text = await ics.text();
     expect(text).toContain("BEGIN:VCALENDAR");
     expect(text).toContain("DTSTART:20260302T000000Z");
+  });
+});
+
+describe("internal API", () => {
+  it("creates an event type for a host sub with externalRef idempotency", async () => {
+    const app = testApp();
+    const first = await app.request("/internal/v1/event-types", {
+      method: "POST",
+      headers: internalHeaders(),
+      body: JSON.stringify({
+        hostSub: "employer-1",
+        slug: "interview-job-1",
+        name: "Interview 30",
+        durationMinutes: 30,
+        hostTimeZone: "Asia/Tokyo",
+        externalRef: "job-1",
+        rules: weekdayRules,
+      }),
+    });
+    expect(first.status).toBe(201);
+    const second = await app.request("/internal/v1/event-types", {
+      method: "POST",
+      headers: internalHeaders(),
+      body: JSON.stringify({
+        hostSub: "employer-1",
+        slug: "interview-job-1-other",
+        name: "Interview 30",
+        durationMinutes: 30,
+        hostTimeZone: "Asia/Tokyo",
+        externalRef: "job-1",
+        rules: weekdayRules,
+      }),
+    });
+    expect(second.status).toBe(200);
+    const body = (await second.json()) as { externalRef: string; slug: string };
+    expect(body.externalRef).toBe("job-1");
+    expect(body.slug).toBe("interview-job-1");
+  });
+
+  it("lists event types for a host sub", async () => {
+    const app = testApp();
+    await app.request("/internal/v1/event-types", {
+      method: "POST",
+      headers: internalHeaders(),
+      body: JSON.stringify({
+        hostSub: "employer-2",
+        slug: "interview-2",
+        name: "Interview",
+        durationMinutes: 30,
+        hostTimeZone: "Asia/Tokyo",
+        rules: weekdayRules,
+      }),
+    });
+    const listed = await app.request("/internal/v1/hosts/employer-2/event-types", { headers: internalHeaders() });
+    expect(listed.status).toBe(200);
+    const body = (await listed.json()) as { eventTypes: { slug: string }[] };
+    expect(body.eventTypes).toHaveLength(1);
+  });
+
+  it("returns a booking with event metadata for P10", async () => {
+    const app = testApp();
+    await app.request("/internal/v1/event-types", {
+      method: "POST",
+      headers: internalHeaders(),
+      body: JSON.stringify({
+        hostSub: "employer-3",
+        slug: "p10-book",
+        name: "P10 Interview",
+        durationMinutes: 30,
+        hostTimeZone: "Asia/Tokyo",
+        rules: weekdayRules,
+      }),
+    });
+    const listed = await app.request("/internal/v1/hosts/employer-3/event-types", { headers: internalHeaders() });
+    const { eventTypes } = (await listed.json()) as { eventTypes: { slug: string }[] };
+    const booked = await app.request("/public/p10-book/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bookBody({ idempotencyKey: "idem-p10" })),
+    });
+    expect(booked.status).toBe(201);
+    const created = (await booked.json()) as { id: string };
+    const got = await app.request(`/internal/v1/bookings/${created.id}`, { headers: internalHeaders() });
+    expect(got.status).toBe(200);
+    const detail = (await got.json()) as { booking: { guestEmail: string }; eventType: { slug: string } };
+    expect(detail.eventType.slug).toBe("p10-book");
+    expect(detail.booking.guestEmail).toBe("a@example.test");
+    expect(eventTypes[0].slug).toBe("p10-book");
+  });
+
+  it("rejects internal calls without a token", async () => {
+    const app = testApp();
+    const res = await app.request("/internal/v1/hosts/x/event-types", { headers: { Authorization: "Bearer wrong" } });
+    expect(res.status).toBe(401);
   });
 });
 

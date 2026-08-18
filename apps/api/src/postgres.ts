@@ -19,6 +19,7 @@ type EventTypeRow = {
   buffer_minutes: number;
   min_notice_minutes: number;
   host_time_zone: string;
+  external_ref: string | null;
 };
 
 type RuleRow = {
@@ -98,8 +99,8 @@ export class PostgresStore implements Store {
       await client.query("BEGIN");
       await client.query(
         `INSERT INTO event_types (
-           id, host_id, slug, name, duration_minutes, buffer_minutes, min_notice_minutes, host_time_zone
-         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+           id, host_id, slug, name, duration_minutes, buffer_minutes, min_notice_minutes, host_time_zone, external_ref
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
         [
           id,
           host.id,
@@ -109,6 +110,7 @@ export class PostgresStore implements Store {
           input.bufferMinutes,
           input.minNoticeMinutes,
           input.hostTimeZone,
+          input.externalRef ?? null,
         ],
       );
       await insertRules(client, id, input.rules);
@@ -292,6 +294,40 @@ export class PostgresStore implements Store {
     };
   }
 
+  async findEventTypeByExternalRef(host: Host, externalRef: string): Promise<EventType | null> {
+    const found = await this.pool.query<EventTypeRow>(
+      "SELECT * FROM event_types WHERE host_id = $1 AND external_ref = $2",
+      [host.id, externalRef],
+    );
+    if (!found.rowCount) {
+      return null;
+    }
+    return this.hydrate(found.rows[0]);
+  }
+
+  async getBookingWithEventById(id: string): Promise<BookingWithEvent | null> {
+    const found = await this.pool.query<
+      BookingRow & { event_name: string; host_time_zone: string; slug: string }
+    >(
+      `SELECT b.id, b.event_type_id, b.start_at, b.end_at, b.guest_name, b.guest_email, b.guest_time_zone, b.status, b.idempotency_key,
+              e.name AS event_name, e.host_time_zone, e.slug
+       FROM bookings b
+       JOIN event_types e ON e.id = b.event_type_id
+       WHERE b.id = $1`,
+      [id],
+    );
+    if (!found.rowCount) {
+      return null;
+    }
+    const row = found.rows[0];
+    return {
+      booking: toBooking(row),
+      eventTypeName: row.event_name,
+      hostTimeZone: row.host_time_zone,
+      eventSlug: row.slug,
+    };
+  }
+
   private async bookingById(id: string): Promise<Booking> {
     const found = await this.pool.query<BookingRow>(
       `SELECT id, event_type_id, start_at, end_at, guest_name, guest_email, guest_time_zone, status, idempotency_key
@@ -380,6 +416,7 @@ function toEventType(row: EventTypeRow, rules: AvailabilityRule[], overrides: Da
     bufferMinutes: row.buffer_minutes,
     minNoticeMinutes: row.min_notice_minutes,
     hostTimeZone: row.host_time_zone,
+    externalRef: row.external_ref ?? undefined,
     rules,
     overrides,
   };

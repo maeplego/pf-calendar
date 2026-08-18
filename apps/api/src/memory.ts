@@ -37,6 +37,7 @@ export class MemoryStore implements Store {
       bufferMinutes: input.bufferMinutes,
       minNoticeMinutes: input.minNoticeMinutes,
       hostTimeZone: input.hostTimeZone,
+      externalRef: input.externalRef,
       rules: cloneRules(input.rules),
       overrides: [],
     };
@@ -137,6 +138,32 @@ export class MemoryStore implements Store {
   async getBookingByCancelToken(cancelToken: string): Promise<BookingWithEvent | null> {
     const row = this.findByTokenHash(cancelToken);
     if (!row || row.status !== "confirmed") {
+      return null;
+    }
+    const eventType = this.eventTypes.get(row.eventTypeId);
+    if (!eventType) {
+      return null;
+    }
+    return {
+      booking: publicBooking(row),
+      eventTypeName: eventType.name,
+      hostTimeZone: eventType.hostTimeZone,
+      eventSlug: eventType.slug,
+    };
+  }
+
+  async findEventTypeByExternalRef(host: Host, externalRef: string): Promise<EventType | null> {
+    for (const row of this.eventTypes.values()) {
+      if (row.hostId === host.id && row.externalRef === externalRef) {
+        return cloneEventType(row);
+      }
+    }
+    return null;
+  }
+
+  async getBookingWithEventById(id: string): Promise<BookingWithEvent | null> {
+    const row = this.bookings.find((b) => b.id === id);
+    if (!row) {
       return null;
     }
     const eventType = this.eventTypes.get(row.eventTypeId);

@@ -25,6 +25,7 @@ const app = createApp({
   clock: systemClock,
   hostAuth,
   corsOrigin: cfg.corsOrigin,
+  internalToken: cfg.internalToken || undefined,
 });
 serve({ fetch: app.fetch, port: cfg.port });
 console.log(`calendar-api listening on :${cfg.port}`);

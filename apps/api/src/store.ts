@@ -1,4 +1,4 @@
-import type { Booking, BookingInsert, DateOverride, EventType, EventTypeInput, Host } from "./domain.js";
+import type { Booking, BookingInsert, BookingWithEvent, DateOverride, EventType, EventTypeInput, Host } from "./domain.js";
 import type { AvailabilityRule } from "./domain.js";
 
 export type Store = {
@@ -15,4 +15,6 @@ export type Store = {
   createBooking(eventType: EventType, input: BookingInsert): Promise<{ booking: Booking; created: boolean }>;
   cancelBookingByToken(cancelToken: string): Promise<Booking>;
   getBookingByCancelToken(cancelToken: string): Promise<BookingWithEvent | null>;
+  findEventTypeByExternalRef(host: Host, externalRef: string): Promise<EventType | null>;
+  getBookingWithEventById(id: string): Promise<BookingWithEvent | null>;
 };

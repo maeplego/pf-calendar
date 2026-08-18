@@ -6,6 +6,7 @@ export type Config = {
   oidcInternalBase: string;
   oidcAudience: string;
   corsOrigin: string;
+  internalToken: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -22,5 +23,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     oidcInternalBase: env.OIDC_INTERNAL_BASE?.trim() ?? oidcIssuer,
     oidcAudience: env.OIDC_AUDIENCE?.trim() ?? "",
     corsOrigin: env.CALENDAR_CORS_ORIGIN?.trim() || "*",
+    internalToken: env.CALENDAR_INTERNAL_TOKEN?.trim() ?? "",
   };
 }
