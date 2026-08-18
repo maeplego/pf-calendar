@@ -1,0 +1,305 @@
+openapi: 3.1.0
+info:
+  title: pf-calendar API
+  version: 0.1.0
+  description: P05 予約・日程調整。Instant は ISO-8601 UTC。詳細は project/portfolio-plan/calendar/docs/05-api.md。
+servers:
+  - url: http://localhost:8095
+paths:
+  /health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+  /ready:
+    get:
+      summary: Readiness (store ping)
+      responses:
+        "200":
+          description: Store reachable
+        "503":
+          description: Store unavailable
+  /openapi.yaml:
+    get:
+      summary: This OpenAPI document
+      responses:
+        "200":
+          description: YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+  /public/{slug}/slots:
+    get:
+      summary: List bookable slot starts (public)
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: rangeStart
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: rangeEnd
+          required: true
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: now
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: Slot metadata and starts
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /public/{slug}/book:
+    post:
+      summary: Confirm a booking (public)
+      parameters:
+        - in: path
+          name: slug
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookRequest"
+      responses:
+        "201":
+          description: New booking (includes cancelToken once)
+        "200":
+          description: Idempotent replay (no cancelToken)
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /public/bookings/cancel:
+    post:
+      summary: Cancel by cancelToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cancelToken]
+              properties:
+                cancelToken:
+                  type: string
+      responses:
+        "200":
+          description: Cancelled
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /public/bookings/ics:
+    get:
+      summary: Download ICS for a booking
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: text/calendar attachment
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/event-types:
+    get:
+      summary: List host event types
+      security:
+        - HostAuth: []
+      responses:
+        "200":
+          description: Event types for authenticated host
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      summary: Create event type
+      security:
+        - HostAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EventTypeCreate"
+      responses:
+        "201":
+          description: Created
+        "409":
+          $ref: "#/components/responses/Conflict"
+  /internal/v1/event-types:
+    post:
+      summary: Provision event type for P10
+      security:
+        - InternalBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/EventTypeCreate"
+                - type: object
+                  required: [hostSub]
+                  properties:
+                    hostSub:
+                      type: string
+                    externalRef:
+                      type: string
+      responses:
+        "201":
+          description: Created
+        "200":
+          description: Existing externalRef
+        "503":
+          description: Internal API disabled
+  /internal/v1/hosts/{sub}/event-types:
+    get:
+      summary: List event types for host sub
+      security:
+        - InternalBearer: []
+      parameters:
+        - in: path
+          name: sub
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Event types
+  /internal/v1/bookings/{id}:
+    get:
+      summary: Booking detail for P10
+      security:
+        - InternalBearer: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Booking with event metadata
+        "404":
+          $ref: "#/components/responses/NotFound"
+components:
+  securitySchemes:
+    HostAuth:
+      type: apiKey
+      in: header
+      name: X-Dev-Host-Sub
+      description: Dev auth header, or Authorization Bearer when OIDC enabled
+    InternalBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: token
+  schemas:
+    ErrorBody:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+    BookRequest:
+      type: object
+      required: [slotStart, name, email, guestTimeZone, idempotencyKey]
+      properties:
+        slotStart:
+          type: string
+          format: date-time
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        guestTimeZone:
+          type: string
+        idempotencyKey:
+          type: string
+          minLength: 8
+          maxLength: 128
+    EventTypeCreate:
+      type: object
+      required: [slug, name, durationMinutes, hostTimeZone]
+      properties:
+        slug:
+          type: string
+          pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*$'
+        name:
+          type: string
+        durationMinutes:
+          type: integer
+          minimum: 1
+        bufferMinutes:
+          type: integer
+          minimum: 0
+        minNoticeMinutes:
+          type: integer
+          minimum: 0
+        hostTimeZone:
+          type: string
+        rules:
+          type: array
+          items:
+            type: object
+            properties:
+              dayOfWeek:
+                type: integer
+                minimum: 1
+                maximum: 7
+              startLocal:
+                type: string
+              endLocal:
+                type: string
+  responses:
+    InvalidRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    Unauthorized:
+      description: Missing or invalid host auth
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    Conflict:
+      description: Slot unavailable or slug/idempotency conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
