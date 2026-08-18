@@ -12,6 +12,8 @@ deploy/                Postgres + API Compose
 
 `apps/web` と `apps/worker` は次スライス以降です。ホスト認証は暫定で `X-Dev-Host-Sub`（P01 OIDC はスライス 4）。
 
+要件・仕様・設計・テスト・API・図表はメタリポジトリの `project/portfolio-plan/calendar/docs/`。
+
 ## 起動
 
 ```powershell
