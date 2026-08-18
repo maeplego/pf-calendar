@@ -1,5 +1,6 @@
 import { Temporal } from "@js-temporal/polyfill";
 import { describe, expect, it } from "vitest";
+import { createHostAuth } from "./auth.js";
 import { createApp } from "./app.js";
 import type { Clock } from "./clock.js";
 import { MemoryStore } from "./memory.js";
@@ -19,7 +20,11 @@ const weekdayRules = [1, 2, 3, 4, 5].map((dayOfWeek) => ({
 function testApp(now = tokyoInstant("2026-03-01T00:00:00")) {
   const clock: Clock = { nowIso: () => now };
   const store = new MemoryStore();
-  return createApp({ store, clock, devAuth: true });
+  return createApp({
+    store,
+    clock,
+    hostAuth: createHostAuth({ devAuth: true, oidcIssuer: "", oidcInternalBase: "", oidcAudience: "" }),
+  });
 }
 
 function hostHeaders(sub = "host-a"): Record<string, string> {

@@ -7,27 +7,50 @@ P05 の予約・日程調整です。**本番 Calendly の置き換えではあ�
 ```
 packages/slot-engine/  スロット計算の純関数（Temporal）
 apps/api/              Hono。イベントタイプと公開 book。枠は slot-engine、重複は DB exclusion
-deploy/                Postgres + API Compose
+apps/web/              Next.js。公開予約 UI + ホストダッシュボード（book は API を直接呼ぶ）
+deploy/                Postgres + API + Web Compose
 ```
 
-`apps/web` と `apps/worker` は次スライス以降です。ホスト認証は暫定で `X-Dev-Host-Sub`（P01 OIDC はスライス 4）。
+`apps/worker` は次スライス以降です。
 
 要件・仕様・設計・テスト・API・図表はメタリポジトリの `project/portfolio-plan/calendar/docs/`。
 
-## 起動
+## 起動（Compose）
 
 ```powershell
-docker compose -f deploy/compose.yaml up --build
+copy deploy\.env.example deploy\.env
+docker compose -f deploy/compose.yaml --env-file deploy/.env up --build
 ```
 
 | URL | 用途 |
 | --- | --- |
-| http://localhost:8095/health | liveness |
-| http://localhost:8095/v1/event-types | ホスト API（ヘッダ `X-Dev-Host-Sub` 必須） |
-| http://localhost:8095/public/:slug/slots | ゲスト向け空き枠（認証なし） |
-| http://localhost:8095/public/:slug/book | ゲスト予約（認証なし） |
+| http://localhost:3005 | Web UI（公開予約 + ホスト） |
+| http://localhost:8095/health | API liveness |
+| http://localhost:8095/public/:slug/slots | ゲスト向け空き枠 |
+| http://localhost:8095/public/:slug/book | ゲスト予約 |
 
-ホストなしで API だけ動かすときは `CALENDAR_DATABASE_URL` を空にするとメモリ実装になります。
+## 開発（ホスト）
+
+```powershell
+npm install
+# ターミナル 1: API（DB なしならメモリ）
+$env:CALENDAR_DATABASE_URL=""
+$env:CALENDAR_CORS_ORIGIN="http://localhost:3005"
+npm run dev -w @pf-calendar/api
+
+# ターミナル 2: Web
+$env:CALENDAR_API_URL="http://localhost:8095"
+$env:NEXT_PUBLIC_CALENDAR_API_URL="http://localhost:8095"
+npm run dev -w @pf-calendar/web
+```
+
+開発中のホスト認証は `X-Dev-Host-Sub`（Web は `/host?host=demo-host-a` で切替）。P01 OIDC 連携時は `deploy/.env.example` の OIDC 節を参照。
+
+## デモ手順
+
+1. http://localhost:3005/host でイベントタイプ作成（slug 例: `demo-30`）
+2. http://localhost:3005/book/demo-30 でゲスト TZ を切替しながら枠を予約
+3. ホスト詳細画面で確定予約を確認
 
 ## テスト
 
@@ -35,4 +58,4 @@ docker compose -f deploy/compose.yaml up --build
 npm test
 ```
 
-`packages/slot-engine` と `apps/api`（httptest + メモリ store）。Postgres は Compose 用で、単体テストは DB を要求しません。
+`packages/slot-engine` と `apps/api`（httptest + メモリ store）。Web は手動デモ。

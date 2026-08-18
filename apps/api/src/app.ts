@@ -4,7 +4,9 @@ import {
   RangeTooLongError,
 } from "@pf-calendar/slot-engine";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import { z } from "zod";
+import type { HostAuth } from "./auth.js";
 import type { Clock } from "./clock.js";
 import { ConflictError, NotFoundError, SlotUnavailableError, type EventType, type Host } from "./domain.js";
 import { isOfferedStart, offeredStartIsos } from "./slots.js";
@@ -58,11 +60,20 @@ type Env = {
 export type AppDeps = {
   store: Store;
   clock: Clock;
-  devAuth: boolean;
+  hostAuth: HostAuth;
+  corsOrigin?: string;
 };
 
 export function createApp(deps: AppDeps): Hono<Env> {
   const app = new Hono<Env>();
+
+  app.use(
+    "/public/*",
+    cors({
+      origin: deps.corsOrigin ?? "*",
+      allowMethods: ["GET", "POST", "OPTIONS"],
+    }),
+  );
 
   app.get("/health", (c) => c.json({ ok: true }));
   app.get("/ready", async (c) => {
@@ -165,12 +176,12 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   app.use("/v1/*", async (c, next) => {
-    if (!deps.devAuth) {
-      return c.json({ error: { code: "unauthorized", message: "OIDC is not wired yet; set CALENDAR_DEV_AUTH=true" } }, 401);
-    }
-    const sub = c.req.header("X-Dev-Host-Sub")?.trim();
+    const sub = await deps.hostAuth.resolveSub(c.req.raw.headers);
     if (!sub) {
-      return c.json({ error: { code: "unauthorized", message: "X-Dev-Host-Sub is required" } }, 401);
+      return c.json(
+        { error: { code: "unauthorized", message: "host authentication required (Bearer token or dev header)" } },
+        401,
+      );
     }
     const host = await deps.store.ensureHost(sub);
     c.set("host", host);

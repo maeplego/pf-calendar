@@ -21,13 +21,38 @@ services:
       dockerfile: apps/api/Dockerfile
     environment:
       CALENDAR_HTTP_PORT: "8095"
-      CALENDAR_DATABASE_URL: postgres://calendar:calendar@calendar-db:5432/calendar
-      CALENDAR_DEV_AUTH: "true"
+      CALENDAR_DATABASE_URL: ${CALENDAR_DATABASE_URL:-postgres://calendar:calendar@calendar-db:5432/calendar}
+      CALENDAR_DEV_AUTH: ${CALENDAR_DEV_AUTH:-true}
+      CALENDAR_CORS_ORIGIN: ${CALENDAR_CORS_ORIGIN:-http://localhost:3005}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_INTERNAL_BASE: ${OIDC_INTERNAL_BASE:-}
+      OIDC_AUDIENCE: ${OIDC_AUDIENCE:-}
     ports:
       - "8095:8095"
     depends_on:
       calendar-db:
         condition: service_healthy
+
+  calendar-web:
+    build:
+      context: ..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_CALENDAR_API_URL: ${NEXT_PUBLIC_CALENDAR_API_URL:-http://localhost:8095}
+    environment:
+      CALENDAR_API_URL: ${CALENDAR_API_URL:-http://calendar-api:8095}
+      NEXT_PUBLIC_CALENDAR_API_URL: ${NEXT_PUBLIC_CALENDAR_API_URL:-http://localhost:8095}
+      OIDC_ISSUER: ${OIDC_ISSUER:-}
+      OIDC_INTERNAL_BASE: ${OIDC_INTERNAL_BASE:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_POST_LOGOUT_REDIRECT_URI: ${OIDC_POST_LOGOUT_REDIRECT_URI:-}
+    extra_hosts:
+      - "localhost:host-gateway"
+    ports:
+      - "3005:3005"
+    depends_on:
+      - calendar-api
 
 volumes:
   calendar-pg:

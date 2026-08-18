@@ -13,6 +13,7 @@
     "@js-temporal/polyfill": "^0.5.1",
     "@pf-calendar/slot-engine": "*",
     "hono": "^4.7.0",
+    "jose": "^5.10.0",
     "pg": "^8.13.0",
     "ulidx": "^2.4.0",
     "zod": "^3.24.0"
