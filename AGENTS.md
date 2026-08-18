@@ -8,4 +8,4 @@
 4. `project/portfolio-idea/11-booking-scheduler.md`
 5. `project/calendar/chat-context/` をファイル名順
 
-テスト: `npm test` をリポジトリルートで実行する（`packages/slot-engine` と `apps/api`）。通ってからこのリポジトリにコミットする。
+テスト: `npm test` をリポジトリルートで実行する（slot-engine、api、worker）。通ってからこのリポジトリにコミットする。
