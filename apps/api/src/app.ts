@@ -1,4 +1,7 @@
 import { Temporal } from "@js-temporal/polyfill";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   InvalidSlotInputError,
   RangeTooLongError,
@@ -11,6 +14,7 @@ import type { Clock } from "./clock.js";
 import { ConflictError, NotFoundError, SlotUnavailableError, type EventType, type Host } from "./domain.js";
 import { isOfferedStart, offeredStartIsos } from "./slots.js";
 import type { Store } from "./store.js";
+import { buildBookingConfirmedEvent } from "./events.js";
 import { buildBookingIcs } from "./ics.js";
 import { newCancelToken } from "./tokens.js";
 
@@ -71,6 +75,16 @@ export type AppDeps = {
   internalToken?: string;
 };
 
+const openapiPath = path.join(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+  "..",
+  "..",
+  "packages",
+  "openapi",
+  "openapi.yaml",
+);
+
 export function createApp(deps: AppDeps): Hono<Env> {
   const app = new Hono<Env>();
 
@@ -126,6 +140,10 @@ export function createApp(deps: AppDeps): Hono<Env> {
   });
 
   app.get("/health", (c) => c.json({ ok: true }));
+  app.get("/openapi.yaml", async (c) => {
+    const yaml = await readFile(openapiPath, "utf8");
+    return c.body(yaml, 200, { "Content-Type": "application/yaml; charset=utf-8" });
+  });
   app.get("/ready", async (c) => {
     try {
       await deps.store.ping();
@@ -218,6 +236,24 @@ export function createApp(deps: AppDeps): Hono<Env> {
       };
       if (result.created) {
         body.cancelToken = cancel.token;
+        const host = await deps.store.getHostForEventType(row.id);
+        await deps.store.enqueueOutboxEvent(
+          buildBookingConfirmedEvent(
+            {
+              bookingId: result.booking.id,
+              eventTypeId: row.id,
+              externalRef: row.externalRef,
+              hostSub: host.sub,
+              slug: row.slug,
+              start: result.booking.start,
+              end: result.booking.end,
+              guestName: result.booking.guestName,
+              guestEmail: result.booking.guestEmail,
+              guestTimeZone: result.booking.guestTimeZone,
+            },
+            deps.clock.nowIso(),
+          ),
+        );
       }
       return c.json(body, result.created ? 201 : 200);
     } catch (err) {

@@ -1,9 +1,12 @@
+import type { CalendarEventEnvelope } from "./events.js";
 import type { Booking, BookingInsert, BookingWithEvent, DateOverride, EventType, EventTypeInput, Host } from "./domain.js";
 import type { AvailabilityRule } from "./domain.js";
 
 export type Store = {
   ping(): Promise<void>;
   ensureHost(sub: string): Promise<Host>;
+  getHostForEventType(eventTypeId: string): Promise<Host>;
+  enqueueOutboxEvent(event: CalendarEventEnvelope): Promise<void>;
   createEventType(host: Host, input: EventTypeInput): Promise<EventType>;
   getEventType(host: Host, id: string): Promise<EventType>;
   getEventTypeBySlug(slug: string): Promise<EventType>;

@@ -8,6 +8,7 @@ import {
   type DueReminder,
   type ReminderKind,
 } from "./reminder.js";
+import { defaultWebhookDeliverer, runOutboxCycle } from "./outbox.js";
 
 export type WorkerConfig = {
   databaseUrl: string;
@@ -15,6 +16,7 @@ export type WorkerConfig = {
   smtpPort: number;
   mailFrom: string;
   pollSeconds: number;
+  webhookUrl: string;
 };
 
 export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
@@ -29,6 +31,7 @@ export function loadWorkerConfig(env: NodeJS.ProcessEnv = process.env): WorkerCo
     smtpPort: Number.parseInt(env.CALENDAR_SMTP_PORT ?? "1025", 10),
     mailFrom: env.CALENDAR_MAIL_FROM ?? "calendar@localhost",
     pollSeconds: Number.isFinite(pollSeconds) && pollSeconds > 0 ? pollSeconds : 60,
+    webhookUrl: env.CALENDAR_WEBHOOK_URL?.trim() ?? "",
   };
 }
 
@@ -92,11 +95,18 @@ export async function startWorker(cfg: WorkerConfig): Promise<void> {
     secure: false,
   });
   console.log(`calendar-worker polling every ${cfg.pollSeconds}s (smtp ${cfg.smtpHost}:${cfg.smtpPort})`);
+  if (cfg.webhookUrl) {
+    console.log(`outbox webhook target: ${cfg.webhookUrl}`);
+  }
   for (;;) {
     try {
-      const n = await runReminderCycle(pool, transport, cfg);
-      if (n > 0) {
-        console.log(`sent ${n} reminder(s)`);
+      const reminders = await runReminderCycle(pool, transport, cfg);
+      if (reminders > 0) {
+        console.log(`sent ${reminders} reminder(s)`);
+      }
+      const events = await runOutboxCycle(pool, cfg.webhookUrl, defaultWebhookDeliverer);
+      if (events > 0) {
+        console.log(`delivered ${events} outbox event(s)`);
       }
     } catch (err) {
       console.error("reminder cycle failed", err);

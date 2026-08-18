@@ -71,6 +71,7 @@ services:
       CALENDAR_SMTP_PORT: "1025"
       CALENDAR_MAIL_FROM: ${CALENDAR_MAIL_FROM:-calendar@localhost}
       CALENDAR_REMINDER_POLL_SECONDS: ${CALENDAR_REMINDER_POLL_SECONDS:-60}
+      CALENDAR_WEBHOOK_URL: ${CALENDAR_WEBHOOK_URL:-}
     depends_on:
       calendar-db:
         condition: service_healthy

@@ -67,3 +67,17 @@ CREATE TABLE IF NOT EXISTS reminder_sent (
   sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (booking_id, kind)
 );
+
+-- P10 向け。予約確定を HTTP webhook へ配信する outbox（worker がポーリング）。
+CREATE TABLE IF NOT EXISTS outbox_events (
+  id TEXT PRIMARY KEY,
+  event_type TEXT NOT NULL,
+  payload JSONB NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  delivered_at TIMESTAMPTZ,
+  delivery_attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS outbox_events_pending_idx ON outbox_events (created_at)
+  WHERE delivered_at IS NULL;

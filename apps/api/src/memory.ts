@@ -1,5 +1,6 @@
 import { Temporal } from "@js-temporal/polyfill";
 import { ConflictError, NotFoundError, type Booking, type BookingInsert, type BookingWithEvent, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
+import type { CalendarEventEnvelope } from "./events.js";
 import { newId } from "./ids.js";
 import type { AvailabilityRule } from "./domain.js";
 import type { Store } from "./store.js";
@@ -9,8 +10,10 @@ type StoredBooking = Booking & { cancelTokenHash: string };
 
 export class MemoryStore implements Store {
   private hostsBySub = new Map<string, Host>();
+  private hostsById = new Map<string, Host>();
   private eventTypes = new Map<string, EventType>();
   private bookings: StoredBooking[] = [];
+  readonly outboxEvents: CalendarEventEnvelope[] = [];
 
   async ping(): Promise<void> {
     return;
@@ -23,7 +26,24 @@ export class MemoryStore implements Store {
     }
     const host: Host = { id: newId(), sub };
     this.hostsBySub.set(sub, host);
+    this.hostsById.set(host.id, host);
     return host;
+  }
+
+  async getHostForEventType(eventTypeId: string): Promise<Host> {
+    const row = this.eventTypes.get(eventTypeId);
+    if (!row) {
+      throw new NotFoundError();
+    }
+    const host = this.hostsById.get(row.hostId);
+    if (!host) {
+      throw new NotFoundError();
+    }
+    return host;
+  }
+
+  async enqueueOutboxEvent(event: CalendarEventEnvelope): Promise<void> {
+    this.outboxEvents.push(structuredClone(event));
   }
 
   async createEventType(host: Host, input: EventTypeInput): Promise<EventType> {

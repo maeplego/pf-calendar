@@ -17,15 +17,18 @@ const weekdayRules = [1, 2, 3, 4, 5].map((dayOfWeek) => ({
   endLocal: "12:00",
 }));
 
+import { CALENDAR_BOOKING_CONFIRMED } from "./events.js";
+
 function testApp(now = tokyoInstant("2026-03-01T00:00:00"), internalToken = "test-internal") {
   const clock: Clock = { nowIso: () => now };
   const store = new MemoryStore();
-  return createApp({
+  const app = createApp({
     store,
     clock,
     hostAuth: createHostAuth({ devAuth: true, oidcIssuer: "", oidcInternalBase: "", oidcAudience: "" }),
     internalToken,
   });
+  return { app, store };
 }
 
 function internalHeaders(token = "test-internal"): Record<string, string> {
@@ -53,7 +56,7 @@ function bookBody(overrides: Record<string, unknown> = {}) {
 
 describe("calendar API event types", () => {
   it("creates an event type and lists it for the same host only", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const created = await app.request("/v1/event-types", {
       method: "POST",
       headers: hostHeaders(),
@@ -79,7 +82,7 @@ describe("calendar API event types", () => {
   });
 
   it("computes Tokyo weekday slots from stored rules via slot-engine", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const created = await app.request("/v1/event-types", {
       method: "POST",
       headers: hostHeaders(),
@@ -109,7 +112,7 @@ describe("calendar API event types", () => {
   });
 
   it("emits no slots on a blocked override date", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const created = await app.request("/v1/event-types", {
       method: "POST",
       headers: hostHeaders(),
@@ -137,7 +140,7 @@ describe("calendar API event types", () => {
   });
 
   it("replaces availability rules", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const created = await app.request("/v1/event-types", {
       method: "POST",
       headers: hostHeaders(),
@@ -167,7 +170,7 @@ describe("calendar API event types", () => {
   });
 
   it("rejects a range longer than 14 days", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const created = await app.request("/v1/event-types", {
       method: "POST",
       headers: hostHeaders(),
@@ -188,7 +191,7 @@ describe("calendar API event types", () => {
   });
 
   it("rejects a duplicate slug", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const body = {
       slug: "dup",
       name: "Dup",
@@ -211,22 +214,32 @@ describe("calendar API event types", () => {
   });
 
   it("requires the demo host header", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const res = await app.request("/v1/event-types");
     expect(res.status).toBe(401);
   });
 
   it("reports health without a host header", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const health = await app.request("/health");
     const ready = await app.request("/ready");
     expect(health.status).toBe(200);
     expect(ready.status).toBe(200);
   });
+
+  it("serves the OpenAPI document", async () => {
+    const { app } = testApp();
+    const res = await app.request("/openapi.yaml");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("yaml");
+    const text = await res.text();
+    expect(text).toContain("openapi: 3.1.0");
+    expect(text).toContain("/public/{slug}/book");
+  });
 });
 
 describe("public booking", () => {
-  async function seedTokyo(app: ReturnType<typeof testApp>, slug = "public-30") {
+  async function seedTokyo(app: ReturnType<typeof testApp>["app"], slug = "public-30") {
     const created = await app.request("/v1/event-types", {
       method: "POST",
       headers: hostHeaders(),
@@ -243,7 +256,7 @@ describe("public booking", () => {
   }
 
   it("lists public slots without host auth and without guest PII", async () => {
-    const app = testApp();
+    const { app } = testApp();
     await seedTokyo(app);
     const slots = await app.request(`/public/public-30/slots?${mondayRange()}`);
     expect(slots.status).toBe(200);
@@ -261,7 +274,7 @@ describe("public booking", () => {
   });
 
   it("books an offered slot and hides it afterwards", async () => {
-    const app = testApp();
+    const { app } = testApp();
     await seedTokyo(app);
     const booked = await app.request("/public/public-30/book", {
       method: "POST",
@@ -286,7 +299,7 @@ describe("public booking", () => {
   });
 
   it("lets only one of two concurrent books for the same slot succeed", async () => {
-    const app = testApp();
+    const { app } = testApp();
     await seedTokyo(app, "race-30");
     const [a, b] = await Promise.all([
       app.request("/public/race-30/book", {
@@ -310,7 +323,7 @@ describe("public booking", () => {
   });
 
   it("rejects a client-invented Instant that is not an offered slot", async () => {
-    const app = testApp();
+    const { app } = testApp();
     await seedTokyo(app, "invented");
     const booked = await app.request("/public/invented/book", {
       method: "POST",
@@ -321,7 +334,7 @@ describe("public booking", () => {
   });
 
   it("replays the same idempotency key without issuing a second cancel token", async () => {
-    const app = testApp();
+    const { app } = testApp();
     await seedTokyo(app, "idem-30");
     const first = await app.request("/public/idem-30/book", {
       method: "POST",
@@ -340,7 +353,7 @@ describe("public booking", () => {
   });
 
   it("cancels a booking with the cancel token and frees the slot", async () => {
-    const app = testApp();
+    const { app } = testApp();
     await seedTokyo(app, "cancel-me");
     const booked = await app.request("/public/cancel-me/book", {
       method: "POST",
@@ -364,7 +377,7 @@ describe("public booking", () => {
   });
 
   it("returns not found for an invalid cancel token without leaking email", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const res = await app.request("/public/bookings/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -374,8 +387,31 @@ describe("public booking", () => {
     expect(JSON.stringify(await res.json())).not.toMatch(/@/);
   });
 
+  it("enqueues calendar.booking.confirmed on a new booking only", async () => {
+    const { app, store } = testApp();
+    await seedTokyo(app, "evt-book");
+    const booked = await app.request("/public/evt-book/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bookBody({ idempotencyKey: "idem-event-1" })),
+    });
+    expect(booked.status).toBe(201);
+    expect(store.outboxEvents).toHaveLength(1);
+    expect(store.outboxEvents[0].type).toBe(CALENDAR_BOOKING_CONFIRMED);
+    expect(store.outboxEvents[0].data.slug).toBe("evt-book");
+    expect(store.outboxEvents[0].data.hostSub).toBe("host-a");
+
+    const replay = await app.request("/public/evt-book/book", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(bookBody({ idempotencyKey: "idem-event-1" })),
+    });
+    expect(replay.status).toBe(200);
+    expect(store.outboxEvents).toHaveLength(1);
+  });
+
   it("serves ICS for a confirmed booking token", async () => {
-    const app = testApp();
+    const { app } = testApp();
     await seedTokyo(app, "ics-me");
     const booked = await app.request("/public/ics-me/book", {
       method: "POST",
@@ -394,7 +430,7 @@ describe("public booking", () => {
 
 describe("internal API", () => {
   it("creates an event type for a host sub with externalRef idempotency", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const first = await app.request("/internal/v1/event-types", {
       method: "POST",
       headers: internalHeaders(),
@@ -429,7 +465,7 @@ describe("internal API", () => {
   });
 
   it("lists event types for a host sub", async () => {
-    const app = testApp();
+    const { app } = testApp();
     await app.request("/internal/v1/event-types", {
       method: "POST",
       headers: internalHeaders(),
@@ -449,7 +485,7 @@ describe("internal API", () => {
   });
 
   it("returns a booking with event metadata for P10", async () => {
-    const app = testApp();
+    const { app } = testApp();
     await app.request("/internal/v1/event-types", {
       method: "POST",
       headers: internalHeaders(),
@@ -480,13 +516,13 @@ describe("internal API", () => {
   });
 
   it("rejects internal calls without a token", async () => {
-    const app = testApp();
+    const { app } = testApp();
     const res = await app.request("/internal/v1/hosts/x/event-types", { headers: { Authorization: "Bearer wrong" } });
     expect(res.status).toBe(401);
   });
 });
 
-async function eventId(app: ReturnType<typeof testApp>): Promise<string> {
+async function eventId(app: ReturnType<typeof testApp>["app"]): Promise<string> {
   const listed = await app.request("/v1/event-types", { headers: hostHeaders() });
   const body = (await listed.json()) as { eventTypes: { id: string }[] };
   return body.eventTypes[0].id;

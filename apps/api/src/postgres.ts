@@ -2,11 +2,13 @@ import { Temporal } from "@js-temporal/polyfill";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import pg from "pg";
 import { ConflictError, NotFoundError, type Booking, type BookingInsert, type BookingWithEvent, type DateOverride, type EventType, type EventTypeInput, type Host } from "./domain.js";
 import { newId } from "./ids.js";
 import type { AvailabilityRule } from "./domain.js";
 import type { Store } from "./store.js";
 import { hashCancelToken } from "./tokens.js";
+import type { CalendarEventEnvelope } from "./events.js";
 
 const schemaPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "schema.sql");
 
@@ -90,6 +92,27 @@ export class PostgresStore implements Store {
       }
       throw err;
     }
+  }
+
+  async getHostForEventType(eventTypeId: string): Promise<Host> {
+    const found = await this.pool.query<{ id: string; sub: string }>(
+      `SELECT h.id, h.sub
+       FROM hosts h
+       JOIN event_types e ON e.host_id = h.id
+       WHERE e.id = $1`,
+      [eventTypeId],
+    );
+    if (!found.rowCount) {
+      throw new NotFoundError();
+    }
+    return found.rows[0];
+  }
+
+  async enqueueOutboxEvent(event: CalendarEventEnvelope): Promise<void> {
+    await this.pool.query(
+      "INSERT INTO outbox_events (id, event_type, payload) VALUES ($1, $2, $3::jsonb)",
+      [event.id, event.type, JSON.stringify(event)],
+    );
   }
 
   async createEventType(host: Host, input: EventTypeInput): Promise<EventType> {
