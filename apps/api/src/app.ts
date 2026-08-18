@@ -14,7 +14,7 @@ import type { Clock } from "./clock.js";
 import { ConflictError, NotFoundError, SlotUnavailableError, type EventType, type Host } from "./domain.js";
 import { isOfferedStart, offeredStartIsos } from "./slots.js";
 import type { Store } from "./store.js";
-import { buildBookingConfirmedEvent } from "./events.js";
+import { CALENDAR_BOOKING_CONFIRMED, buildBookingConfirmedEvent } from "./events.js";
 import { buildBookingIcs } from "./ics.js";
 import { newCancelToken } from "./tokens.js";
 
@@ -47,6 +47,25 @@ const createSchema = z.object({
 
 const rulesBodySchema = z.object({ rules: z.array(ruleSchema) });
 const overridesBodySchema = z.object({ overrides: z.array(overrideSchema) });
+
+// P10 webhook (dev stub): worker outbox deliveries are POSTed here.
+const calendarBookingConfirmedWebhookSchema = z.object({
+  id: z.string().min(1),
+  type: z.literal(CALENDAR_BOOKING_CONFIRMED),
+  occurredAt: z.string().min(1),
+  data: z.object({
+    bookingId: z.string().min(1),
+    eventTypeId: z.string().min(1),
+    externalRef: z.string().min(1).optional(),
+    hostSub: z.string().min(1),
+    slug: z.string().min(1),
+    start: z.string().min(1),
+    end: z.string().min(1),
+    guestName: z.string().min(1),
+    guestEmail: z.string().min(1),
+    guestTimeZone: z.string().min(1),
+  }),
+});
 
 const bookSchema = z.object({
   slotStart: z.string().min(1),
@@ -143,6 +162,25 @@ export function createApp(deps: AppDeps): Hono<Env> {
   app.get("/openapi.yaml", async (c) => {
     const yaml = await readFile(openapiPath, "utf8");
     return c.body(yaml, 200, { "Content-Type": "application/yaml; charset=utf-8" });
+  });
+
+  // Dev/stub endpoint for outbox webhook deliveries.
+  // P10 will replace this with a real integration receiver.
+  app.post("/webhooks/calendar", async (c) => {
+    const headerType = c.req.header("X-Calendar-Event-Type")?.trim() ?? "";
+    const body = (await c.req.json().catch(() => null)) as unknown;
+    if (!body || !headerType) {
+      return invalid(c as { json: (body: unknown, status: 400) => Response }, "invalid webhook payload");
+    }
+
+    const parsed = calendarBookingConfirmedWebhookSchema.safeParse(body);
+    if (!parsed.success) {
+      return invalid(c as { json: (body: unknown, status: 400) => Response }, "invalid webhook payload");
+    }
+    if (headerType !== parsed.data.type) {
+      return invalid(c as { json: (body: unknown, status: 400) => Response }, "invalid webhook event type");
+    }
+    return c.json({ ok: true });
   });
   app.get("/ready", async (c) => {
     try {
