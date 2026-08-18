@@ -1,0 +1,33 @@
+services:
+  calendar-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: calendar
+      POSTGRES_PASSWORD: calendar
+      POSTGRES_DB: calendar
+    ports:
+      - "5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U calendar -d calendar"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - calendar-pg:/var/lib/postgresql/data
+
+  calendar-api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      CALENDAR_HTTP_PORT: "8095"
+      CALENDAR_DATABASE_URL: postgres://calendar:calendar@calendar-db:5432/calendar
+      CALENDAR_DEV_AUTH: "true"
+    ports:
+      - "8095:8095"
+    depends_on:
+      calendar-db:
+        condition: service_healthy
+
+volumes:
+  calendar-pg:

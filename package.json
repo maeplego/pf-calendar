@@ -2,9 +2,10 @@
   "name": "pf-calendar",
   "private": true,
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "apps/*"
   ],
   "scripts": {
-    "test": "npm test --workspace=@pf-calendar/slot-engine"
+    "test": "npm test --workspaces --if-present"
   }
 }
