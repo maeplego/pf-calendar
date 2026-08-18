@@ -15,9 +15,12 @@ CREATE TABLE IF NOT EXISTS event_types (
   buffer_minutes INTEGER NOT NULL DEFAULT 0,
   min_notice_minutes INTEGER NOT NULL DEFAULT 0,
   host_time_zone TEXT NOT NULL,
+  external_ref TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE event_types ADD COLUMN IF NOT EXISTS external_ref TEXT;
 
 CREATE TABLE IF NOT EXISTS availability_rules (
   id TEXT PRIMARY KEY,
@@ -56,4 +59,11 @@ CREATE TABLE IF NOT EXISTS bookings (
       during WITH &&
     )
     WHERE (status = 'confirmed')
+);
+
+CREATE TABLE IF NOT EXISTS reminder_sent (
+  booking_id TEXT NOT NULL REFERENCES bookings (id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('24h', '1h')),
+  sent_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (booking_id, kind)
 );

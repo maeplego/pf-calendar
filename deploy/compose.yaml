@@ -54,5 +54,27 @@ services:
     depends_on:
       - calendar-api
 
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  calendar-worker:
+    build:
+      context: ..
+      dockerfile: apps/worker/Dockerfile
+    environment:
+      CALENDAR_DATABASE_URL: ${CALENDAR_DATABASE_URL:-postgres://calendar:calendar@calendar-db:5432/calendar}
+      CALENDAR_SMTP_HOST: mailhog
+      CALENDAR_SMTP_PORT: "1025"
+      CALENDAR_MAIL_FROM: ${CALENDAR_MAIL_FROM:-calendar@localhost}
+      CALENDAR_REMINDER_POLL_SECONDS: ${CALENDAR_REMINDER_POLL_SECONDS:-60}
+    depends_on:
+      calendar-db:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+
 volumes:
   calendar-pg:
