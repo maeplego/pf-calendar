@@ -1,0 +1,21 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Chat dumps if any land here
+chat-context/
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
