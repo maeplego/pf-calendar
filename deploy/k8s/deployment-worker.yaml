@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  labels:
+    app: calendar-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calendar-worker
+  template:
+    metadata:
+      labels:
+        app: calendar-worker
+    spec:
+      containers:
+        - name: worker
+          image: pf-calendar-worker:latest
+          env:
+            - name: CALENDAR_DATABASE_URL
+              value: postgres://calendar:dev-calendar@postgres.platform.svc.cluster.local:5432/calendar?sslmode=disable
+            - name: CALENDAR_SMTP_HOST
+              value: localhost
+            - name: CALENDAR_SMTP_PORT
+              value: "1025"
+            - name: CALENDAR_MAIL_FROM
+              value: calendar@localhost
+            - name: CALENDAR_REMINDER_POLL_SECONDS
+              value: "15"
+            - name: CALENDAR_WEBHOOK_URL
+              value: http://api.p10.svc.cluster.local:8090/webhooks/calendar

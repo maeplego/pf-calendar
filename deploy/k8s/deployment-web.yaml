@@ -1,0 +1,40 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  labels:
+    app: calendar-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calendar-web
+  template:
+    metadata:
+      labels:
+        app: calendar-web
+    spec:
+      containers:
+        - name: web
+          image: pf-calendar-web:latest
+          ports:
+            - containerPort: 3005
+          env:
+            - name: PORT
+              value: "3005"
+            - name: CALENDAR_API_URL
+              value: http://api.p05.svc.cluster.local:8095
+            - name: NEXT_PUBLIC_CALENDAR_API_URL
+              value: http://calendar-api.localhost
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3005
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3005
+            initialDelaySeconds: 20
+            periodSeconds: 10

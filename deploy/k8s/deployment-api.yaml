@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  labels:
+    app: calendar-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: calendar-api
+  template:
+    metadata:
+      labels:
+        app: calendar-api
+    spec:
+      containers:
+        - name: api
+          image: pf-calendar-api:latest
+          ports:
+            - containerPort: 8095
+          env:
+            - name: CALENDAR_HTTP_PORT
+              value: "8095"
+            - name: CALENDAR_DEV_AUTH
+              value: "false"
+            - name: CALENDAR_CORS_ORIGIN
+              value: http://calendar.localhost
+            - name: CALENDAR_DATABASE_URL
+              value: postgres://calendar:dev-calendar@postgres.platform.svc.cluster.local:5432/calendar?sslmode=disable
+            - name: CALENDAR_INTERNAL_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: p05-secrets
+                  key: CALENDAR_INTERNAL_TOKEN
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8095
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8095
+            initialDelaySeconds: 15
+            periodSeconds: 10
