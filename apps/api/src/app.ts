@@ -8,6 +8,7 @@ import {
 } from "@pf-calendar/slot-engine";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { corsConfigured, honoCorsOrigin } from "./cors.js";
 import { z } from "zod";
 import type { HostAuth } from "./auth.js";
 import type { Clock } from "./clock.js";
@@ -107,13 +108,15 @@ const openapiPath = path.join(
 export function createApp(deps: AppDeps): Hono<Env> {
   const app = new Hono<Env>();
 
-  app.use(
-    "/public/*",
-    cors({
-      origin: deps.corsOrigin ?? "*",
-      allowMethods: ["GET", "POST", "OPTIONS"],
-    }),
-  );
+  if (corsConfigured(deps.corsOrigin)) {
+    app.use(
+      "/public/*",
+      cors({
+        origin: honoCorsOrigin(deps.corsOrigin),
+        allowMethods: ["GET", "POST", "OPTIONS"],
+      }),
+    );
+  }
 
   app.post("/public/bookings/cancel", async (c) => {
     const body = (await c.req.json().catch(() => null)) as { cancelToken?: string } | null;

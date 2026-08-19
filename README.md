@@ -24,6 +24,8 @@ docker compose -f deploy/compose.yaml --env-file deploy/.env up --build
 | http://localhost:8095/openapi.yaml | OpenAPI |
 | http://localhost:8025 | Mailhog（リマインド確認） |
 
+公開予約 API の CORS 既定は `http://localhost:3005` です。
+
 ## デモ
 
 1. `/host` でイベントタイプを作る（slug 例: `demo-30`）

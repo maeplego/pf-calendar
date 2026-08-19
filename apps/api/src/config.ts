@@ -22,7 +22,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     oidcIssuer,
     oidcInternalBase: env.OIDC_INTERNAL_BASE?.trim() ?? oidcIssuer,
     oidcAudience: env.OIDC_AUDIENCE?.trim() ?? "",
-    corsOrigin: env.CALENDAR_CORS_ORIGIN?.trim() || "*",
+    corsOrigin: env.CALENDAR_CORS_ORIGIN?.trim() || "http://localhost:3005",
     internalToken: env.CALENDAR_INTERNAL_TOKEN?.trim() ?? "",
   };
 }

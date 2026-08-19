@@ -522,6 +522,27 @@ describe("internal API", () => {
   });
 });
 
+describe("calendar public CORS", () => {
+  it("echoes the web origin and does not use *", async () => {
+    const clock: Clock = { nowIso: () => tokyoInstant("2026-03-01T00:00:00") };
+    const app = createApp({
+      store: new MemoryStore(),
+      clock,
+      hostAuth: createHostAuth({ devAuth: true, oidcIssuer: "", oidcInternalBase: "", oidcAudience: "" }),
+      corsOrigin: "http://localhost:3005",
+    });
+    const allowed = await app.request(`/public/casual-30/slots?${mondayRange()}`, {
+      headers: { Origin: "http://localhost:3005" },
+    });
+    expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:3005");
+
+    const other = await app.request(`/public/casual-30/slots?${mondayRange()}`, {
+      headers: { Origin: "https://evil.example" },
+    });
+    expect(other.headers.get("Access-Control-Allow-Origin")).toBeNull();
+  });
+});
+
 async function eventId(app: ReturnType<typeof testApp>["app"]): Promise<string> {
   const listed = await app.request("/v1/event-types", { headers: hostHeaders() });
   const body = (await listed.json()) as { eventTypes: { id: string }[] };
