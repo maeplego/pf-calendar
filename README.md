@@ -42,4 +42,18 @@ npm test
 
 slot-engine、api、worker のユニットテストです。Postgres の exclusion テストは、Compose が無いときは skip します。
 
+公開予約のブラウザ確認（メモリ API。既定 CI では動かない）:
+
+```powershell
+cd apps/e2e
+npx playwright install chromium
+npx playwright test
+```
+
+Compose 起動後のヘルス:
+
+```powershell
+node scripts/compose-smoke.mjs http://localhost:8095/health http://localhost:8095/ready
+```
+
 設計の詳細は [portfolio-plan](https://github.com/maeplego/portfolio-plan) の `portfolio-plan/calendar/docs/` です。

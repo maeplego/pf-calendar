@@ -4,6 +4,14 @@ coverage/
 *.tsbuildinfo
 .next/
 
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+apps/e2e/test-results/
+apps/e2e/playwright-report/
+
 # Secrets
 .env
 .env.*

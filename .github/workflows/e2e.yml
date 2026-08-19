@@ -1,0 +1,25 @@
+# Public book journey against in-memory API. Dispatch-only.
+name: e2e
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: install Chromium
+        working-directory: apps/e2e
+        run: npx playwright install --with-deps chromium
+      - name: Playwright
+        working-directory: apps/e2e
+        run: npx playwright test
