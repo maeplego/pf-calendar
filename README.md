@@ -1,21 +1,16 @@
 # pf-calendar
 
-P05 の予約・日程調整です。**本番 Calendly の置き換えではありません。** 学習用ポートフォリオです。
+学習用の予約・日程調整です。空きルールからスロットを作り、ホスト現地のタイムゾーンで矛盾しない枠だけを出します。公開予約に Identity Provider は不要です。**Calendly などの置き換えではありません。**
 
-空きルールからスロットを生成し、ホスト現地のタイムゾーンで矛盾しない枠だけを出します。予約確定の正は `apps/api` です。公開予約に IdP は不要です。
+| ディレクトリ | 役割 |
+| --- | --- |
+| `packages/slot-engine` | スロット計算（純関数） |
+| `apps/api` | 公開予約、キャンセル、ICS、内部 API |
+| `apps/web` | 公開予約とホスト画面 |
+| `apps/worker` | リマインドと webhook 配信 |
+| `deploy/` | Postgres + API + Web + Worker |
 
-```
-packages/slot-engine/  スロット計算の純関数（Temporal）
-packages/openapi/      OpenAPI 3.1（GET /openapi.yaml で配信）
-apps/api/              Hono。公開 book / キャンセル / ICS / internal API / outbox
-apps/web/              Next.js。公開予約 UI + ホストダッシュボード
-apps/worker/           24h / 1h リマインド + outbox webhook 配信
-deploy/                Postgres + API + Web + Worker Compose
-```
-
-要件・仕様・設計・テスト・API・図表はメタリポジトリの `project/portfolio-plan/calendar/docs/`。
-
-## 起動（Compose）
+## 起動
 
 ```powershell
 copy deploy\.env.example deploy\.env
@@ -24,22 +19,18 @@ docker compose -f deploy/compose.yaml --env-file deploy/.env up --build
 
 | URL | 用途 |
 | --- | --- |
-| http://localhost:3005 | Web UI |
+| http://localhost:3005 | Web |
 | http://localhost:8095/health | API |
 | http://localhost:8095/openapi.yaml | OpenAPI |
 | http://localhost:8025 | Mailhog（リマインド確認） |
 
-## デモ手順
+## デモ
 
-1. `/host` でイベントタイプ作成（slug 例: `demo-30`）
-2. `/book/demo-30` で予約（完了画面から .ics / キャンセルリンク）
-3. `/cancel?token=...` で取消
-4. 内部 API（P10 用）: `CALENDAR_INTERNAL_TOKEN` を設定し `POST /internal/v1/event-types`
-5. P10 webhook: `CALENDAR_WEBHOOK_URL` を worker に設定。予約確定で `calendar.booking.confirmed` が POST される
+1. `/host` でイベントタイプを作る（slug 例: `demo-30`）
+2. `/book/demo-30` で予約する。完了画面から .ics とキャンセルリンクが取れます
+3. `/cancel?token=...` で取り消せます
 
-## P05 ↔ P10 連携デモ
-
-P10 talent-api と組み合わせた予約確定→面接ステータス更新デモの手順は `project/portfolio-plan/integration-demo.md` の「P05 ↔ P10」節を参照。
+求人アプリ [pf-talent-api](https://github.com/maeplego/pf-talent-api) 向けに、予約確定で `calendar.booking.confirmed` を POST できます（`CALENDAR_WEBHOOK_URL`）。
 
 ## テスト
 
@@ -47,13 +38,6 @@ P10 talent-api と組み合わせた予約確定→面接ステータス更新�
 npm test
 ```
 
-slot-engine、api、worker の vitest。Web は手動デモ。
+slot-engine、api、worker のユニットテストです。Postgres の exclusion テストは、Compose が無いときは skip します。
 
-Postgres exclusion（TS-M01）:
-
-```powershell
-$env:CALENDAR_DATABASE_URL='postgres://calendar:calendar@localhost:5434/calendar'
-npm test -w @pf-calendar/api
-```
-
-Compose 起動中でない場合は integration テストは skip される。
+設計の詳細は [portfolio-plan](https://github.com/maeplego/portfolio-plan) の `portfolio-plan/calendar/docs/` です。

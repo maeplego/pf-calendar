@@ -1,10 +1,3 @@
-# P05 Kubernetes manifests
+# Kubernetes マニフェスト（P05 calendar）
 
-calendar api / web / worker。DB URL や internal token は overlay から渡す前提で、単体 apply ではなく `pf-cloud-k8s` から参照する。
-
-```powershell
-cd ..\..\pf-cloud-k8s
-# 後続で追加する scheduling-talent overlay から起動
-```
-
-Compose 単体デモは従来どおり `deploy/compose.yaml`。
+api / web / worker です。接続文字列は overlay が渡します。このフォルダだけを apply しないでください。起動は [pf-cloud-k8s](https://github.com/maeplego/pf-cloud-k8s) の scheduling-talent overlay からです。単体デモは `deploy/compose.yaml` です。
