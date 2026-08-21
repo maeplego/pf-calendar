@@ -1,4 +1,4 @@
-# pf-calendar
+﻿# pf-calendar
 
 学習用の予約・日程調整です。空きルールからスロットを作り、ホスト現地のタイムゾーンで矛盾しない枠だけを出します。公開予約に Identity Provider は不要です。**Calendly などの置き換えではありません。**
 
@@ -57,3 +57,13 @@ node scripts/compose-smoke.mjs http://localhost:8095/health http://localhost:809
 ```
 
 設計の詳細は [portfolio-plan](https://github.com/maeplego/portfolio-plan) の `portfolio-plan/calendar/docs/` です。
+
+## ライセンスと利用条件
+
+本リポジトリは **デモ・学習・社内評価用** です。現状品質に **保証はありません**。
+
+- 許可: クローン、ローカル実行、学習、非本番の評価
+- 別契約が必要: 本番運用、有償サービスへの組込み、再販・托管の提供
+
+詳細は [LICENSE](./LICENSE) と [licensing.md](https://github.com/maeplego/portfolio-plan/blob/master/portfolio-plan/licensing.md) を参照してください。
+
